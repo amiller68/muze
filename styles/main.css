@@ -1,0 +1,303 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@import 'animations.css';
+
+@layer base {
+  html {
+    background-color: #121212;
+    height: 100%;
+  }
+  
+  body {
+    width: 100%;
+    font-family: 'Roboto', system-ui, sans-serif;
+    color: #f3f4f6;
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+  }
+  
+  /* Dark theme overrides */
+  .dark input, 
+  .dark textarea, 
+  .dark select {
+    background-color: #2a2a2a;
+    border-color: #2a2a2a;
+    color: #f3f4f6;
+  }
+  
+  .dark input::placeholder,
+  .dark textarea::placeholder {
+    color: #9ca3af;
+  }
+  
+  .dark input:focus,
+  .dark textarea:focus,
+  .dark select:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+  }
+}
+
+@layer components {
+  /* Franken UI overrides for dark theme */
+  .dark .uk-card,
+  .uk-card {
+    border-radius: 0.5rem;
+    overflow: hidden;
+    background-color: #1e1e1e;
+  }
+  
+  .dark .uk-card-body,
+  .uk-card-body {
+    padding: 1.5rem;
+  }
+  
+  .dark .uk-card-header,
+  .uk-card-header {
+    padding: 1rem;
+    padding-bottom: 0.75rem;
+  }
+  
+  .dark .uk-card-footer,
+  .uk-card-footer {
+    padding: 1rem;
+    padding-top: 0.75rem;
+  }
+  
+  .dark .uk-card-title,
+  .uk-card-title {
+    font-weight: 700;
+    color: #f3f4f6;
+  }
+  
+  .dark .uk-card-primary,
+  .uk-card-primary {
+    background-color: #3b82f6;
+    color: white;
+  }
+  
+  .dark .uk-card-secondary,
+  .uk-card-secondary {
+    background-color: #2a2a2a;
+    color: #f3f4f6;
+  }
+  
+  .dark .uk-card-destructive,
+  .uk-card-destructive {
+    background-color: #ef4444;
+    color: white;
+  }
+
+  /* Franken UI table overrides for dark mode */
+  .dark .uk-table,
+  .uk-table {
+    width: 100%;
+    border-collapse: collapse;
+    color: inherit;
+  }
+  
+  .dark .uk-table th,
+  .uk-table th {
+    text-align: left;
+    font-weight: 500;
+    color: #f3f4f6;
+    vertical-align: bottom;
+  }
+  
+  .dark .uk-table td,
+  .uk-table td {
+    text-align: left;
+    color: #f3f4f6;
+    vertical-align: top;
+  }
+  
+  .dark .uk-table-divider th,
+  .dark .uk-table-divider td,
+  .uk-table-divider th,
+  .uk-table-divider td {
+    border-bottom-width: 1px;
+    border-bottom-color: #121212;
+  }
+  
+  .dark .uk-table-hover tr:hover,
+  .uk-table-hover tr:hover {
+    background-color: #2a2a2a;
+  }
+  
+  .dark .uk-table-striped tbody tr:nth-of-type(odd),
+  .uk-table-striped tbody tr:nth-of-type(odd) {
+    background-color: #2a2a2a;
+  }
+  
+  .dark .uk-table-middle th,
+  .dark .uk-table-middle td,
+  .uk-table-middle th,
+  .uk-table-middle td {
+    vertical-align: middle;
+  }
+
+  /* Button styling overrides */
+  .dark .uk-btn,
+  .uk-btn {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    transition-property: all;
+    transition-duration: 200ms;
+    display: inline-block;
+  }
+  
+  .dark .uk-btn-primary,
+  .uk-btn-primary {
+    background-color: #3b82f6;
+    color: white;
+  }
+  
+  .dark .uk-btn-primary:hover,
+  .uk-btn-primary:hover {
+    background-color: #2563eb;
+  }
+  
+  .dark .uk-btn-default,
+  .uk-btn-default {
+    background-color: #2a2a2a;
+    color: #f3f4f6;
+  }
+  
+  .dark .uk-btn-default:hover,
+  .uk-btn-default:hover {
+    background-color: #121212;
+  }
+  
+  .dark .uk-btn-sm,
+  .uk-btn-sm {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    padding-top: 0.25rem;
+    padding-bottom: 0.25rem;
+    font-size: 0.875rem;
+  }
+
+  /* Basic components */
+  .btn {
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-radius: 0.5rem;
+    font-weight: 500;
+    transition-property: all;
+    transition-duration: 200ms;
+  }
+
+  .btn-primary {
+    background-color: #3b82f6;
+    color: white;
+  }
+  
+  .btn-primary:hover {
+    background-color: #2563eb;
+  }
+
+  .input {
+    width: 100%;
+    padding-left: 1rem;
+    padding-right: 1rem;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-radius: 0.5rem;
+    border-width: 1px;
+    outline: none;
+    transition-property: all;
+    transition-duration: 200ms;
+  }
+  
+  .input:focus {
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    border-color: #3b82f6;
+  }
+
+  .sidebar-container {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    z-index: 50;
+    height: 100vh;
+    transition-property: width;
+    transition-duration: 300ms;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+/* Theme-specific overrides */
+/* Force white text on primary colored buttons */
+.dark .bg-primary:hover, 
+.dark .bg-primary-dark:hover, 
+.dark .uk-btn-primary:hover {
+  color: white !important;
+}
+
+/* Force modal background color */
+.dark .uk-modal-container::before,
+.dark .uk-modal::before {
+  background-color: rgba(0, 0, 0, 0.5) !important;
+}
+
+/* Fix Franken UI issues in dark mode */
+.dark .uk-modal-dialog {
+  background-color: #1e1e1e;
+}
+
+.dark .uk-modal-title {
+  color: #f3f4f6;
+}
+
+.dashboard-container {
+  width: 100%;
+  max-width: 48rem; /* 3xl = 48rem */
+  padding: 1rem; /* p-4 */
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem; /* gap-6 */
+  align-items: stretch;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.main-content #content {
+    width: 100%;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+    position: relative;
+}
+
+/* Line clamp utilities */
+.line-clamp-1 {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

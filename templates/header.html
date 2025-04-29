@@ -1,0 +1,70 @@
+{% block header %}
+<header class="flex items-stretch w-full border-b-2 border-black shadow-header">
+  <div class="flex items-center border-r-2 border-black w-48">
+    <a href="/" id="nav-home" class="flex items-center px-4 py-2 hover:bg-pink-600 w-full" hx-get="/" hx-target="#content" hx-push-url="true">
+      <img src="/static/icon.svg" alt="Icon" class="h-8 mr-2">
+      <div class="flex flex-col">
+        <span class="font-black text-xl leading-none">muze.</span>
+      </div>
+    </a>
+  </div>
+
+  <nav class="flex items-stretch flex-grow">
+    <a href="/new" 
+       id="nav-new"
+       class="flex-1 flex items-center justify-center px-4 py-3 hover:bg-pink-600 border-black" 
+       hx-get="/new" 
+       hx-target="#content" 
+       hx-push-url="true">new</a>
+    <a href="/list" 
+       id="nav-list"
+       class="flex-1 flex items-center justify-center px-4 py-3 hover:bg-pink-600 border-l-2 border-black">list</a>
+    <a href="/search" 
+       id="nav-search"
+       class="flex-1 flex items-center justify-center px-4 py-3 bg-pink-600 hover:bg-dark-pink border-l-2 border-black text-black">beta →</a>
+  </nav>
+  
+  <div class="flex items-stretch">
+  </div>
+</header>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Get current path
+    const path = window.location.pathname;
+    
+    // Reset all nav items
+    document.querySelectorAll('a[id^="nav-"]').forEach(function(el) {
+      el.classList.remove('bg-pink-600', 'text-black');
+    });
+    
+    // Set active nav item based on path
+    if (path === '/' || path === '') {
+      document.getElementById('nav-home').classList.add('bg-pink-600');
+    } else if (path === '/new') {
+      document.getElementById('nav-new').classList.add('bg-pink-600', 'text-black');
+    } else if (path === '/search') {
+      document.getElementById('nav-search').classList.add('bg-pink-600', 'text-black');
+    }
+    
+    // Handle HTMX navigation
+    document.body.addEventListener('htmx:afterSettle', function(event) {
+      const newPath = window.location.pathname;
+      
+      // Reset all nav items
+      document.querySelectorAll('a[id^="nav-"]').forEach(function(el) {
+        el.classList.remove('bg-pink-600', 'text-black');
+      });
+      
+      // Set active nav item based on new path
+      if (newPath === '/' || newPath === '') {
+        document.getElementById('nav-home').classList.add('bg-pink-600');
+      } else if (newPath === '/new') {
+        document.getElementById('nav-new').classList.add('bg-pink-600', 'text-black');
+      } else if (newPath === '/search') {
+        document.getElementById('nav-search').classList.add('bg-pink-600', 'text-black');
+      }
+    });
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-grey">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <script>
+      // Hot reloading for development mode
+      if (window.location.hostname === "localhost") {
+        const hotReload = new EventSource("/dev/hot-reload");
+        
+        hotReload.addEventListener("connected", function(e) {
+          console.log("Hot reload connected:", e.data);
+        });
+        
+        hotReload.addEventListener("reload", function(e) {
+          console.log("Hot reload triggered:", e.data);
+          location.reload();
+        });
+        
+        hotReload.onerror = function(e) {
+          console.error("Hot reload error:", e);
+          // Try to reconnect after 5 seconds if connection fails
+          setTimeout(() => {
+            hotReload.close();
+            location.reload(); // Reload the page to try reconnecting
+          }, 5000);
+        };
+      }
+    </script>
+    
+    <!-- App Title -->
+    <title>{% block title %}muze.{% endblock %}</title>
+
+    <!-- Franken UI Setup - Modified for custom theme -->
+    <link rel="preconnect" href="https://rsms.me/" />
+    <link rel="stylesheet" href="https://rsms.me/inter/inter.css" />
+    <style>
+      :root {
+        font-family: "Roboto", monospace;
+        font-feature-settings: "liga" 1, "calt" 1;
+      }
+      @supports (font-variation-settings: normal) {
+        :root {
+          font-family: "Roboto", monospace;
+        }
+      }
+    </style>
+
+    <link rel="stylesheet" href="https://unpkg.com/franken-ui@internal/dist/css/core.min.css" />
+    <link rel="stylesheet" href="https://unpkg.com/franken-ui@internal/dist/css/utilities.min.css" />
+
+    <script>
+      const htmlElement = document.documentElement;
+      const __FRANKEN__ = JSON.parse(localStorage.getItem("__FRANKEN__") || "{}");
+
+      if (__FRANKEN__.mode === "dark" || (!__FRANKEN__.mode && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        htmlElement.classList.add("dark");
+      } else {
+        htmlElement.classList.remove("dark");
+      }
+
+      // Using our custom theme classes instead of Franken defaults
+      htmlElement.classList.add("uk-radii-md");
+      htmlElement.classList.add("uk-shadows-sm");
+      htmlElement.classList.add("uk-font-sm");
+    </script>
+
+    <script type="module" src="https://unpkg.com/franken-ui@internal/dist/js/core.iife.js"></script>
+    <script type="module" src="https://unpkg.com/franken-ui@internal/dist/js/icon.iife.js"></script>
+
+    <!--JavaScript-->
+    <!--htmx-->
+    <script src="https://unpkg.com/htmx.org@2.0.0-alpha1/dist/htmx.min.js"></script>
+ 
+    <!-- Static Assets -->
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <link href="/static/css/main.css" rel="stylesheet">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,100;0,300;0,400;0,500;0,700;0,900;1,100;1,300;1,400;1,500;1,700;1,900&display=swap" rel="stylesheet">
+</head>
+
+<body class="w-full font-roboto bg-grey">
+  {% block header %}{% endblock %}
+  <main>
+    <div id="content" class="w-full max-w-[1200px] mx-auto p-8 relative">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+</body>
+</html>

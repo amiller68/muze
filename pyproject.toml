@@ -1,0 +1,47 @@
+[project]
+name = "muze"
+version = "0.1.0"
+description = "muze -- a place to think"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy[asyncio]",
+    "psycopg2-binary",
+    "asyncpg",
+    "alembic",
+    "python-dotenv",
+    "python-multipart",
+    "pydantic",
+    "tenacity",
+    "uvicorn",
+    "fastapi",
+    "greenlet",
+    "starlette",
+    "sse-starlette",
+    "jinja2",
+    "itsdangerous==2.1.2",
+    "werkzeug==3.0.1",
+    "anthropic",
+    "setuptools",
+    "watchfiles",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=25.1.0",
+    "mypy>=1.15.0",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.25.3",
+    "pytest-anyio>=0.0.0",
+    "ruff>=0.9.6",
+    "arg>=0.0.1",
+    "pytailwindcss",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+]

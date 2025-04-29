@@ -1,0 +1,52 @@
+name: Python CI 🐍
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    
+    # Service containers to run with the job
+    services:
+      # PostgreSQL service
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: muze
+        ports:
+          - 5432:5432
+        # Health check to wait for postgres to start
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v5
+
+    - name: Set up Python
+      run: uv python install
+        
+    - name: Install dependencies
+      run: |
+        bash bin/install.sh
+        
+    - name: Run database migrations
+      run: |
+        export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/muze
+        bash bin/migrate.sh
+        
+    - name: Run quality checks
+      run: |
+        export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/muze
+        bash bin/check.sh --ci --db-url=$DATABASE_URL
