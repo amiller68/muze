@@ -2,6 +2,7 @@ from fastapi import Request, Depends, HTTPException
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
 
 from src.database.models import Thought
 from src.logger import RequestSpan
@@ -21,7 +22,7 @@ async def handler(
     request: Request,
     db: AsyncSession = Depends(async_db),
     span: RequestSpan = Depends(span),
-):
+) -> HTMLResponse:
     """Create a new thought
 
     Args:
@@ -30,7 +31,7 @@ async def handler(
         span: Request span for logging
 
     Returns:
-        Union[HTMLResponse, RedirectResponse]: The updated entries list or a redirect to the new entry
+        HTMLResponse: The rendered thought template
 
     Raises:
         HTTPException: If creating entry fails
@@ -53,7 +54,14 @@ async def handler(
         thought = await Thought.create(content, db, span)
         await db.commit()
 
-        return thought
+        # Return the thought as HTML
+        return templates.TemplateResponse(
+            "content/thought.html",
+            {
+                "request": request,
+                "thought": thought
+            }
+        )
     except Exception as e:
         span.error(f"Failed to create thought: {str(e)}")
         raise HTTPException(

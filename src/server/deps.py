@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.logger import RequestSpan
 
 def async_db(request: Request) -> AsyncSession:
-    return request.state.database
+    return request.state.db
 
 
 def span(request: Request) -> RequestSpan:

@@ -10,7 +10,7 @@ POSTGRES_PORT="5432"
 POSTGRES_USER="postgres"
 POSTGRES_PASSWORD="postgres"
 POSTGRES_DB="muze"
-POSTGRES_IMAGE_NAME="postgres:17"
+POSTGRES_IMAGE_NAME="pgvector/pgvector:pg17"
 
 # Check if docker or podman is available
 CONTAINER_RUNTIME="docker"

@@ -4,7 +4,7 @@ from fastapi import (
 from dataclasses import dataclass
 from enum import Enum as PyEnum
 
-
+from src.vectorizer import Vectorizer
 from src.database import (
     AsyncDatabase,
 )
@@ -28,6 +28,7 @@ class AppState:
     database: AsyncDatabase
     logger: Logger
     secrets: Secrets
+    vectorizer: Vectorizer
 
     @classmethod
     def from_config(cls, config: Config):
@@ -36,6 +37,7 @@ class AppState:
             database=AsyncDatabase(config.database_async_url),
             logger=Logger(config.log_path, config.debug),
             secrets=config.secrets,
+            vectorizer=Vectorizer(config.database_url),
         )
         return state
 
@@ -43,6 +45,9 @@ class AppState:
         """run any startup logic here"""
         try:
             await self.database.initialize()
+            await self.vectorizer.install()
+            await self.vectorizer.create_vectorizer(self.database)
+            await self.vectorizer.run_worker()
         except Exception as e:
             raise AppStateException(AppStateExceptionType.startup_failed, str(e)) from e
 
