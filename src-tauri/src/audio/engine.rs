@@ -203,6 +203,10 @@ impl AudioEngine {
         self.shared_state.is_recording.load(Ordering::SeqCst)
     }
 
+    pub fn is_available(&self) -> bool {
+        !self.is_dummy
+    }
+
     pub fn position_ms(&self) -> u64 {
         let samples = self.shared_state.playhead_samples.load(Ordering::SeqCst);
         let sample_rate = self.shared_state.sample_rate.load(Ordering::SeqCst);

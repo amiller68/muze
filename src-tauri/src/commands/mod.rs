@@ -1,4 +1,4 @@
-use crate::audio::{splice_audio, AudioEngine, TrackInfo};
+use crate::audio::{splice_audio, delete_audio_region, export_mix, AudioEngine, TrackInfo};
 use crate::project::{self, Clip, Collection, FolderEntry, Mix, Project};
 use std::sync::Arc;
 use tauri::State;
@@ -75,6 +75,11 @@ pub fn is_recording(engine: EngineState) -> bool {
 #[tauri::command]
 pub fn get_input_level(engine: EngineState) -> f32 {
     engine.input_level()
+}
+
+#[tauri::command]
+pub fn is_audio_available(engine: EngineState) -> bool {
+    engine.is_available()
 }
 
 // ============= Collection Commands =============
@@ -240,4 +245,52 @@ pub fn splice_recording(
     output_path: String,
 ) -> Result<u64, String> {
     splice_audio(&original_path, &new_recording_path, start_ms, &output_path)
+}
+
+#[tauri::command]
+pub fn trim_audio(
+    audio_path: String,
+    start_ms: u64,
+    end_ms: u64,
+    output_path: String,
+) -> Result<u64, String> {
+    delete_audio_region(&audio_path, start_ms, end_ms, &output_path)
+}
+
+#[derive(serde::Deserialize)]
+pub struct ExportTrackInfo {
+    pub path: String,
+    pub volume: f32,
+    pub muted: bool,
+}
+
+#[tauri::command]
+pub fn export_mix_to_file(
+    tracks: Vec<ExportTrackInfo>,
+    output_path: String,
+    sample_rate: u32,
+) -> Result<(), String> {
+    let track_data: Vec<(String, f32, bool)> = tracks
+        .into_iter()
+        .map(|t| (t.path, t.volume, t.muted))
+        .collect();
+    export_mix(track_data, &output_path, sample_rate)
+}
+
+#[tauri::command]
+pub fn export_and_share(
+    tracks: Vec<ExportTrackInfo>,
+    output_path: String,
+    sample_rate: u32,
+) -> Result<(), String> {
+    let track_data: Vec<(String, f32, bool)> = tracks
+        .into_iter()
+        .map(|t| (t.path, t.volume, t.muted))
+        .collect();
+
+    // First export the mix
+    export_mix(track_data, &output_path, sample_rate)?;
+
+    // Then open share sheet
+    crate::audio::share_file(&output_path)
 }

@@ -21,32 +21,39 @@ body,
   margin: 0;
   padding: 0;
   overflow: hidden;
+  background-color: #000000;
+}
+
+/* Ensure full coverage including safe areas */
+html {
+  min-height: 100vh;
+  min-height: -webkit-fill-available;
 }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, sans-serif;
-  background-color: #0a0a0f;
-  color: #e0e0e0;
+  background-color: #000000;
+  color: #ffffff;
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling - neutral grays */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #12121a;
+  background: #1c1c1e;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2a3e;
+  background: #3a3a3c;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a4e;
+  background: #48484a;
 }
 
 /* Prevent text selection during drag operations */
@@ -62,4 +69,14 @@ body {
 
 .mb-safe {
   margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Subtle animation for transitions - no jarring effects */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease-out;
 }

@@ -2,11 +2,16 @@ mod audio;
 mod commands;
 mod project;
 
-use audio::AudioEngine;
+use audio::{configure_audio_session, AudioEngine};
 use std::sync::Arc;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Configure audio session (required on iOS before using cpal)
+    if let Err(e) = configure_audio_session() {
+        eprintln!("Failed to configure audio session: {}", e);
+    }
+
     // Initialize the audio engine
     let engine: Arc<AudioEngine> = match AudioEngine::new() {
         Ok(engine) => Arc::new(engine),
@@ -32,6 +37,7 @@ pub fn run() {
             commands::stop_recording,
             commands::is_recording,
             commands::get_input_level,
+            commands::is_audio_available,
             // Collection
             commands::create_collection,
             commands::load_collection,
@@ -53,6 +59,9 @@ pub fn run() {
             // Audio
             commands::load_tracks,
             commands::splice_recording,
+            commands::trim_audio,
+            commands::export_mix_to_file,
+            commands::export_and_share,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

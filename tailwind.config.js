@@ -4,19 +4,36 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: {
-          primary: "#0a0a0f",
-          secondary: "#12121a",
-          tertiary: "#1a1a2e",
+        // iOS-inspired neutral gray palette
+        surface: {
+          primary: "#000000",
+          card: "#1c1c1e",
+          elevated: "#2c2c2e",
         },
-        border: {
-          DEFAULT: "#2a2a3e",
+        // Neutral grays (no blue tint)
+        neutral: {
+          50: "#f5f5f7",
+          100: "#e5e5e7",
+          200: "#d1d1d6",
+          300: "#aeaeb2",
+          400: "#8e8e93",
+          500: "#636366",
+          600: "#48484a",
+          700: "#3a3a3c",
+          800: "#2c2c2e",
+          900: "#1c1c1e",
         },
-        accent: {
-          primary: "#6366f1",
-          danger: "#ef4444",
-        },
-        waveform: "#818cf8",
+        // Single accent color (iOS blue)
+        accent: "#0a84ff",
+        // Destructive action (iOS red)
+        destructive: "#ff453a",
+        // Trim/selection (iOS Voice Memos gold)
+        selection: "#c9a227",
+      },
+      boxShadow: {
+        'card': '0 2px 8px rgba(0, 0, 0, 0.4)',
+        'elevated': '0 4px 16px rgba(0, 0, 0, 0.5)',
+        'button': '0 1px 4px rgba(0, 0, 0, 0.3)',
       },
     },
   },

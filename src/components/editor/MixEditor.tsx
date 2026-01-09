@@ -19,6 +19,11 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
   const [viewMode, setViewMode] = createSignal<"single" | "overlay" | "stacked">("overlay");
   const [inputLevel, setInputLevel] = createSignal(0);
   const [recordingWaveform, setRecordingWaveform] = createSignal<number[]>([]);
+  const [audioError, setAudioError] = createSignal<string | null>(null);
+  const [trimMode, setTrimMode] = createSignal(false);
+  const [trimStart, setTrimStart] = createSignal(0);
+  const [trimEnd, setTrimEnd] = createSignal(0);
+  const [draggingHandle, setDraggingHandle] = createSignal<'start' | 'end' | null>(null);
 
   let waveformRef: HTMLDivElement | undefined;
   let positionInterval: number | undefined;
@@ -40,7 +45,17 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     }
   });
 
-  onMount(() => {
+  onMount(async () => {
+    // Check if audio engine is available
+    try {
+      const available = await invoke<boolean>("is_audio_available");
+      if (!available) {
+        setAudioError("Audio not available - microphone access may be denied");
+      }
+    } catch (e) {
+      setAudioError(`Audio check failed: ${e}`);
+    }
+
     positionInterval = window.setInterval(async () => {
       try {
         const pos = await invoke<number>("get_position");
@@ -263,7 +278,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
       }
     } catch (e) {
       console.error("Record failed:", e);
-      alert(`Recording failed: ${e}`);
+      setAudioError(`Recording failed: ${e}`);
     }
   };
 
@@ -355,76 +370,313 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     return mix.tracks[store.selectedTrack()];
   };
 
+  // Trim mode drag handlers
+  const getTrimPosition = (e: MouseEvent | TouchEvent): number => {
+    if (!waveformRef) return 0;
+    const rect = waveformRef.getBoundingClientRect();
+    const clientX = 'touches' in e ? e.touches[0]?.clientX ?? e.changedTouches[0]?.clientX : e.clientX;
+    const x = clientX - rect.left;
+    const pct = Math.max(0, Math.min(1, x / rect.width));
+    const duration = currentTrack()?.clip?.original_duration_ms || 0;
+    return Math.floor(pct * duration);
+  };
+
+  const handleTrimDragStart = (handle: 'start' | 'end') => (e: MouseEvent | TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDraggingHandle(handle);
+  };
+
+  const handleTrimDragMove = (e: MouseEvent | TouchEvent) => {
+    if (!draggingHandle()) return;
+    e.preventDefault();
+    const ms = getTrimPosition(e);
+    const duration = currentTrack()?.clip?.original_duration_ms || 0;
+
+    if (draggingHandle() === 'start') {
+      setTrimStart(Math.max(0, Math.min(ms, trimEnd() - 100)));
+    } else {
+      setTrimEnd(Math.min(duration, Math.max(ms, trimStart() + 100)));
+    }
+  };
+
+  const handleTrimDragEnd = () => {
+    setDraggingHandle(null);
+  };
+
+  const enterTrimMode = () => {
+    const track = currentTrack();
+    if (!track?.clip) return;
+    const duration = track.clip.original_duration_ms;
+    // Initialize selection to middle 50%
+    setTrimStart(Math.floor(duration * 0.25));
+    setTrimEnd(Math.floor(duration * 0.75));
+    setShowSettings(false);
+    setTrimMode(true);
+  };
+
+  // Delete selection (keep everything outside selection)
+  const handleTrimDelete = async () => {
+    const track = currentTrack();
+    const path = store.mixPath();
+    if (!track?.clip || !path) return;
+
+    const audioPath = `${path}/${track.clip.audio_file}`;
+    try {
+      const newDuration = await invoke<number>("trim_audio", {
+        audioPath,
+        startMs: trimStart(),
+        endMs: trimEnd(),
+        outputPath: audioPath,
+      });
+      store.updateClipDuration(store.selectedTrack(), newDuration);
+      await store.reloadTracks();
+      setTrimMode(false);
+      setTrimStart(0);
+      setTrimEnd(0);
+    } catch (e) {
+      setAudioError(`Trim failed: ${e}`);
+    }
+  };
+
+  // Trim to selection (keep only selection, delete rest)
+  const handleTrimKeep = async () => {
+    const track = currentTrack();
+    const path = store.mixPath();
+    if (!track?.clip || !path) return;
+
+    const audioPath = `${path}/${track.clip.audio_file}`;
+    const duration = track.clip.original_duration_ms;
+
+    try {
+      // Delete everything after selection first
+      if (trimEnd() < duration) {
+        await invoke<number>("trim_audio", {
+          audioPath,
+          startMs: trimEnd(),
+          endMs: duration,
+          outputPath: audioPath,
+        });
+      }
+      // Then delete everything before selection
+      if (trimStart() > 0) {
+        const newDuration = await invoke<number>("trim_audio", {
+          audioPath,
+          startMs: 0,
+          endMs: trimStart(),
+          outputPath: audioPath,
+        });
+        store.updateClipDuration(store.selectedTrack(), newDuration);
+      } else {
+        store.updateClipDuration(store.selectedTrack(), trimEnd() - trimStart());
+      }
+      await store.reloadTracks();
+      setTrimMode(false);
+      setTrimStart(0);
+      setTrimEnd(0);
+    } catch (e) {
+      setAudioError(`Trim failed: ${e}`);
+    }
+  };
+
   return (
-    <div class="h-full flex flex-col bg-black text-white">
+    <div
+      class="fixed inset-0 flex flex-col bg-black text-white"
+      style={{
+        "padding-top": "env(safe-area-inset-top, 0px)",
+        "padding-bottom": "env(safe-area-inset-bottom, 0px)"
+      }}
+    >
       {/* Header */}
-      <div class="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-800">
         <button
           onClick={() => setShowSettings(true)}
-          class="w-10 h-10 flex items-center justify-center text-blue-500"
+          class="w-10 h-10 flex items-center justify-center text-neutral-400"
         >
           <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
           </svg>
         </button>
         <div class="text-center">
-          <div class="font-semibold">{store.currentMix()?.name || "New Mix"}</div>
-          <div class="text-xs text-gray-500">
-            {store.currentMix()?.tracks.length || 0} tracks
+          <div class="font-semibold">
+            {trimMode() ? "Trim Mode" : store.currentMix()?.name || "New Mix"}
+          </div>
+          <div class="text-xs text-neutral-500">
+            {trimMode()
+              ? `Selection: ${formatTimeShort(trimEnd() - trimStart())}`
+              : `${store.currentMix()?.tracks.length || 0} tracks`}
           </div>
         </div>
-        {/* View mode toggle */}
-        <button
-          onClick={() => {
-            const modes: Array<"single" | "overlay" | "stacked"> = ["single", "overlay", "stacked"];
-            const current = modes.indexOf(viewMode());
-            setViewMode(modes[(current + 1) % 3]);
-          }}
-          class="w-10 h-10 flex items-center justify-center text-blue-500"
-          title={`View: ${viewMode()}`}
-        >
-          {viewMode() === "single" && (
+        <div class="flex items-center gap-1">
+          {/* Trim icon */}
+          <button
+            onClick={trimMode() ? () => { setTrimMode(false); setTrimStart(0); setTrimEnd(0); } : enterTrimMode}
+            class={`w-10 h-10 flex items-center justify-center ${
+              trimMode() ? "text-selection" : currentTrack()?.clip ? "text-neutral-400" : "text-neutral-700"
+            }`}
+            disabled={!trimMode() && !currentTrack()?.clip}
+            title={trimMode() ? "Exit trim mode" : "Trim audio"}
+          >
             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="4" y="8" width="16" height="8" rx="1" stroke-width="2"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.121 14.121L19 19m-7-7l7-7m-7 7l-2.879 2.879M12 12L9.121 9.121m0 5.758a3 3 0 10-4.243 4.243 3 3 0 004.243-4.243zm0-5.758a3 3 0 10-4.243-4.243 3 3 0 004.243 4.243z" />
             </svg>
-          )}
-          {viewMode() === "overlay" && (
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="4" y="6" width="16" height="6" rx="1" stroke-width="2"/>
-              <rect x="4" y="12" width="16" height="6" rx="1" stroke-width="2" opacity="0.5"/>
-            </svg>
-          )}
-          {viewMode() === "stacked" && (
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <rect x="4" y="4" width="16" height="4" rx="1" stroke-width="1.5"/>
-              <rect x="4" y="10" width="16" height="4" rx="1" stroke-width="1.5"/>
-              <rect x="4" y="16" width="16" height="4" rx="1" stroke-width="1.5"/>
-            </svg>
-          )}
-        </button>
+          </button>
+          {/* View mode toggle - hide in trim mode */}
+          <Show when={!trimMode()}>
+            <button
+              onClick={() => {
+                const modes: Array<"single" | "overlay" | "stacked"> = ["single", "overlay", "stacked"];
+                const current = modes.indexOf(viewMode());
+                setViewMode(modes[(current + 1) % 3]);
+              }}
+              class="w-10 h-10 flex items-center justify-center text-neutral-400"
+              title={`View: ${viewMode()}`}
+            >
+              {viewMode() === "single" && (
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="4" y="8" width="16" height="8" rx="1" stroke-width="2"/>
+                </svg>
+              )}
+              {viewMode() === "overlay" && (
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="4" y="6" width="16" height="6" rx="1" stroke-width="2"/>
+                  <rect x="4" y="12" width="16" height="6" rx="1" stroke-width="2" opacity="0.5"/>
+                </svg>
+              )}
+              {viewMode() === "stacked" && (
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="4" y="4" width="16" height="4" rx="1" stroke-width="1.5"/>
+                  <rect x="4" y="10" width="16" height="4" rx="1" stroke-width="1.5"/>
+                  <rect x="4" y="16" width="16" height="4" rx="1" stroke-width="1.5"/>
+                </svg>
+              )}
+            </button>
+          </Show>
+        </div>
       </div>
+
+      {/* Audio Error Banner */}
+      <Show when={audioError()}>
+        <div class="bg-destructive/20 text-destructive px-4 py-2 text-sm text-center">
+          {audioError()}
+        </div>
+      </Show>
 
       {/* Waveform Area */}
       <div
         ref={waveformRef}
-        class="flex-1 relative bg-gray-900 cursor-pointer min-h-[200px]"
-        onClick={handleSeek}
-        onWheel={handleWheel}
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
+        class="flex-1 relative bg-neutral-900 cursor-pointer min-h-[200px]"
+        onClick={trimMode() ? undefined : handleSeek}
+        onWheel={trimMode() ? undefined : handleWheel}
+        onTouchStart={trimMode() ? undefined : handleTouchStart}
+        onTouchMove={(e) => { if (trimMode()) handleTrimDragMove(e); else handleTouchMove(e); }}
+        onTouchEnd={() => { if (trimMode()) handleTrimDragEnd(); else handleTouchEnd(); }}
+        onMouseMove={trimMode() ? handleTrimDragMove : undefined}
+        onMouseUp={trimMode() ? handleTrimDragEnd : undefined}
+        onMouseLeave={trimMode() ? handleTrimDragEnd : undefined}
       >
-        <Show
-          when={store.currentMix()?.tracks.some((t) => t.clip)}
-          fallback={
-            <div class="absolute inset-0 flex items-center justify-center">
-              <span class="text-gray-600">Tap record to start</span>
-              <span class="text-gray-700 text-xs ml-2">(tracks: {store.currentMix()?.tracks.length || 0})</span>
-            </div>
-          }
-        >
-          {/* Single mode - only selected track */}
-          <Show when={viewMode() === "single" && !isRecording()}>
+        {/* TRIM MODE - Yellow/gold selection like Voice Memos */}
+        <Show when={trimMode()}>
+          {(() => {
+            const track = currentTrack();
+            if (!track?.clip) return null;
+            const clip = track.clip;
+            const duration = clip.original_duration_ms;
+            const durationSec = duration / 1000;
+            const barCount = Math.max(50, Math.min(300, Math.floor(durationSec * 15)));
+            const bars = generateWaveform(clip.id, barCount);
+            const startPct = (trimStart() / duration) * 100;
+            const endPct = (trimEnd() / duration) * 100;
+
+            return (
+              <>
+                {/* Full-width waveform - white bars */}
+                <div class="absolute inset-0">
+                  <svg class="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+                    <For each={bars}>
+                      {(height, idx) => {
+                        const barHeight = Math.max(height * 40, 2);
+                        const x = (idx() / bars.length) * 100;
+                        const barW = 100 / bars.length * 0.7;
+                        return (
+                          <rect
+                            x={x}
+                            y={50 - barHeight}
+                            width={barW}
+                            height={barHeight * 2}
+                            rx="0.5"
+                            fill="#ffffff"
+                            opacity={0.7}
+                          />
+                        );
+                      }}
+                    </For>
+                  </svg>
+                </div>
+
+                {/* Yellow/gold selection overlay */}
+                <div
+                  class="absolute top-0 bottom-0 pointer-events-none"
+                  style={{
+                    left: `${startPct}%`,
+                    width: `${endPct - startPct}%`,
+                    "background-color": "rgba(180, 150, 80, 0.35)",
+                    "border-top": "2px solid #c9a227",
+                    "border-bottom": "2px solid #c9a227",
+                  }}
+                />
+
+                {/* Start handle - Yellow line with chevron */}
+                <div
+                  class="absolute top-0 bottom-0 cursor-ew-resize z-20"
+                  style={{ left: `calc(${startPct}% - 14px)`, width: "28px" }}
+                  onMouseDown={handleTrimDragStart('start')}
+                  onTouchStart={handleTrimDragStart('start')}
+                >
+                  {/* Vertical line */}
+                  <div class="absolute top-0 bottom-0 w-0.5" style={{ left: "13px", "background-color": "#c9a227" }} />
+                  {/* Top dot */}
+                  <div class="absolute w-2.5 h-2.5 rounded-full" style={{ top: "-5px", left: "10px", "background-color": "#c9a227" }} />
+                  {/* Bottom dot */}
+                  <div class="absolute w-2.5 h-2.5 rounded-full" style={{ bottom: "-5px", left: "10px", "background-color": "#c9a227" }} />
+                  {/* Chevron */}
+                  <div class="absolute top-1/2 -translate-y-1/2 text-2xl font-bold" style={{ left: "0px", color: "#c9a227" }}>‹</div>
+                </div>
+
+                {/* End handle - Yellow line with chevron */}
+                <div
+                  class="absolute top-0 bottom-0 cursor-ew-resize z-20"
+                  style={{ left: `calc(${endPct}% - 14px)`, width: "28px" }}
+                  onMouseDown={handleTrimDragStart('end')}
+                  onTouchStart={handleTrimDragStart('end')}
+                >
+                  {/* Vertical line */}
+                  <div class="absolute top-0 bottom-0 w-0.5" style={{ left: "13px", "background-color": "#c9a227" }} />
+                  {/* Top dot */}
+                  <div class="absolute w-2.5 h-2.5 rounded-full" style={{ top: "-5px", left: "10px", "background-color": "#c9a227" }} />
+                  {/* Bottom dot */}
+                  <div class="absolute w-2.5 h-2.5 rounded-full" style={{ bottom: "-5px", left: "10px", "background-color": "#c9a227" }} />
+                  {/* Chevron */}
+                  <div class="absolute top-1/2 -translate-y-1/2 text-2xl font-bold" style={{ right: "0px", color: "#c9a227" }}>›</div>
+                </div>
+              </>
+            );
+          })()}
+        </Show>
+
+        {/* NORMAL MODE */}
+        <Show when={!trimMode()}>
+          <Show
+            when={store.currentMix()?.tracks.some((t) => t.clip)}
+            fallback={
+              <div class="absolute inset-0 flex items-center justify-center">
+                <span class="text-neutral-600">Tap record to start</span>
+                <span class="text-neutral-700 text-xs ml-2">(tracks: {store.currentMix()?.tracks.length || 0})</span>
+              </div>
+            }
+          >
+            {/* Single mode - only selected track */}
+            <Show when={viewMode() === "single" && !isRecording()}>
             {(() => {
               const track = store.currentMix()?.tracks[store.selectedTrack()];
               if (!track?.clip) return null;
@@ -519,7 +771,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
                   const clip = track.clip;
                   return (
                     <div
-                      class="flex-1 relative border-b border-gray-800 last:border-b-0"
+                      class="flex-1 relative border-b border-neutral-800 last:border-b-0"
                       style={{ "background-color": isSelected ? "rgba(255,255,255,0.03)" : "transparent" }}
                     >
                       {clip && !isSelectedAndRecording() && (() => {
@@ -559,8 +811,8 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
                       })()}
                       {/* Track label */}
                       <div
-                        class="absolute top-1 left-1 text-[9px] px-1 rounded"
-                        style={{ "background-color": track.color, opacity: 0.7 }}
+                        class="absolute top-1 left-1 text-[9px] px-1 rounded text-white"
+                        style={{ "background-color": track.color, opacity: 0.8 }}
                       >
                         {track.name}
                       </div>
@@ -571,16 +823,17 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
             </div>
           </Show>
         </Show>
+        </Show>
 
         {/* Live recording waveform - matches saved waveform style exactly */}
-        <Show when={isRecording()}>
+        <Show when={!trimMode() && isRecording()}>
           {(() => {
             const track = store.currentMix()?.tracks[store.selectedTrack()];
             const waveform = recordingWaveform();
             const startPct = (recordingStartMs() / getTimelineScale()) * 100;
             const currentPct = (playheadMs() / getTimelineScale()) * 100;
             const recWidth = Math.max(currentPct - startPct, 1);
-            const color = track?.color || "#ef4444";
+            const color = track?.color || "#ff453a"; // Use track color for recording waveform
 
             // Calculate bar count same way as saved waveform: 10 bars per second
             const recordingDurationSec = (playheadMs() - recordingStartMs()) / 1000;
@@ -634,36 +887,19 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           })()}
         </Show>
 
-        {/* Playhead */}
-        <div
-          class="absolute top-0 bottom-0 w-0.5 bg-blue-500 pointer-events-none z-10"
-          style={{ left: `${playheadPercent()}%` }}
-        >
-          <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-blue-500" />
-        </div>
-
-        {/* Zoom controls */}
-        <div class="absolute bottom-2 right-2 flex items-center gap-1 z-20">
-          <button
-            onClick={(e) => { e.stopPropagation(); handleZoomOut(); }}
-            class="w-7 h-7 rounded bg-gray-800/80 text-white flex items-center justify-center text-sm"
+        {/* Playhead - hide in trim mode */}
+        <Show when={!trimMode()}>
+          <div
+            class="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none z-10"
+            style={{ left: `${playheadPercent()}%` }}
           >
-            -
-          </button>
-          <span class="text-[10px] text-gray-400 w-10 text-center">
-            {Math.round(zoomLevel() * 100)}%
-          </span>
-          <button
-            onClick={(e) => { e.stopPropagation(); handleZoomIn(); }}
-            class="w-7 h-7 rounded bg-gray-800/80 text-white flex items-center justify-center text-sm"
-          >
-            +
-          </button>
-        </div>
+            <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white" />
+          </div>
+        </Show>
       </div>
 
       {/* Timeline */}
-      <div class="h-6 flex items-center justify-between px-4 text-xs text-gray-500 bg-gray-900 border-t border-gray-800">
+      <div class="h-6 flex items-center justify-between px-4 text-xs text-neutral-500 bg-neutral-900 border-t border-neutral-800">
         <For each={[0, 0.25, 0.5, 0.75, 1]}>
           {(pct) => <span>{formatTimeShort(pct * getTimelineScale())}</span>}
         </For>
@@ -672,7 +908,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
       {/* Time Display */}
       <div class="py-6 text-center bg-black">
         <span
-          class={`font-mono text-5xl font-light ${isRecording() ? "text-red-500" : "text-white"}`}
+          class={`font-mono text-5xl font-light ${isRecording() ? "text-destructive" : "text-white"}`}
         >
           {formatTime(playheadMs())}
         </span>
@@ -716,80 +952,109 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         </button>
       </div>
 
-      {/* Bottom Bar */}
-      <div class="flex items-center justify-between px-4 py-4 bg-black border-t border-gray-800">
-        <div class="w-16" />
-
-        <button
-          onClick={handleRecord}
-          class={`px-8 py-3 rounded-full font-semibold text-lg ${
-            isRecording()
-              ? "bg-red-600 text-white animate-pulse"
-              : "bg-red-500 text-white"
-          }`}
-        >
-          {isRecording() ? "STOP" : currentTrack()?.clip ? "REPLACE" : "RECORD"}
-        </button>
-
-        <button
-          onClick={async () => {
-            console.log("Done button clicked");
-            try {
-              // Stop playback first if playing
-              if (isPlaying()) {
-                await invoke("pause");
-                setIsPlaying(false);
-              }
-              if (isRecording()) {
-                await handleStopRecording();
-              }
-              props.onDone();
-            } catch (e) {
-              console.error("Done button error:", e);
-              props.onDone();
-            }
-          }}
-          class="text-blue-500 font-semibold"
-        >
-          Done
-        </button>
-      </div>
-
-      {/* Track Dots */}
-      <Show when={store.currentMix()?.tracks.length}>
-        <div class="flex items-center justify-center gap-2 pb-4 bg-black">
-          <For each={store.currentMix()?.tracks}>
-            {(track, i) => (
-              <button
-                onClick={() => store.setSelectedTrack(i())}
-                class={`w-2 h-2 rounded-full transition-all ${
-                  store.selectedTrack() === i()
-                    ? "w-3 h-3"
-                    : "opacity-50"
-                }`}
-                style={{ "background-color": track.color }}
-                title={track.name}
-              />
-            )}
-          </For>
-          <Show when={(store.currentMix()?.tracks.length || 0) < 8}>
+      {/* Bottom Controls - hide in trim mode */}
+      <Show when={!trimMode()}>
+        <div class="px-4 py-3">
+          {/* Track Selector Row */}
+          <div class="flex items-center justify-center gap-3 mb-3">
+            <For each={store.currentMix()?.tracks || []}>
+              {(track, i) => (
+                <button
+                  onClick={() => store.setSelectedTrack(i())}
+                  class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold"
+                  style={{
+                    "background-color": track.color,
+                    border: store.selectedTrack() === i() ? "2px solid white" : "2px solid transparent"
+                  }}
+                >
+                  {i() + 1}
+                </button>
+              )}
+            </For>
             <button
               onClick={() => store.addTrack()}
-              class="w-6 h-6 rounded-full border border-gray-600 text-gray-600 flex items-center justify-center text-sm"
+              class="w-8 h-8 rounded-full border border-neutral-600 text-neutral-500 flex items-center justify-center text-xl"
             >
               +
             </button>
-          </Show>
+          </div>
+          {/* Record/Done Row */}
+          <div class="flex items-center justify-between">
+            <div class="w-16" />
+            <button
+              onClick={handleRecord}
+              class={`px-8 py-3 rounded-full font-semibold text-lg ${
+                isRecording()
+                  ? "bg-destructive text-white"
+                  : "bg-destructive text-white"
+              }`}
+            >
+              {isRecording() ? "STOP" : currentTrack()?.clip ? "REPLACE" : "RECORD"}
+            </button>
+            <button
+              onClick={async () => {
+                if (isPlaying()) {
+                  await invoke("pause");
+                  setIsPlaying(false);
+                }
+                if (isRecording()) {
+                  await handleStopRecording();
+                }
+                props.onDone();
+              }}
+              class="w-16 text-neutral-400 font-semibold text-right"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </Show>
+
+      {/* Trim Mode Bottom Controls */}
+      <Show when={trimMode()}>
+        <div class="px-4 py-4 bg-neutral-900/50">
+          <div class="flex items-center justify-between">
+            {/* Left: Trim and Delete buttons */}
+            <div class="flex gap-2">
+              <button
+                onClick={handleTrimKeep}
+                class="px-4 py-2 rounded-lg bg-neutral-700 text-neutral-300 text-sm font-medium"
+              >
+                Trim
+              </button>
+              <button
+                onClick={handleTrimDelete}
+                class="px-4 py-2 rounded-lg bg-neutral-700 text-neutral-300 text-sm font-medium"
+              >
+                Delete
+              </button>
+            </div>
+            {/* Right: Cancel and Apply buttons */}
+            <div class="flex gap-2">
+              <button
+                onClick={() => { setTrimMode(false); setTrimStart(0); setTrimEnd(0); }}
+                class="px-5 py-2 rounded-full bg-neutral-700 text-white text-sm font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleTrimDelete}
+                class="px-5 py-2 rounded-full bg-neutral-700 text-neutral-500 text-sm font-medium"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
         </div>
       </Show>
 
       {/* Settings Modal */}
       <Show when={showSettings()}>
         <div class="fixed inset-0 bg-black/80 z-50 flex items-end justify-center">
-          <div class="bg-gray-900 rounded-t-2xl w-full max-w-md p-6">
+          <div class="bg-neutral-900 rounded-t-2xl w-full max-w-md p-6">
             <div class="flex items-center justify-between mb-6">
               <h2 class="text-xl font-semibold">Track Settings</h2>
-              <button onClick={() => setShowSettings(false)} class="text-blue-500">
+              <button onClick={() => setShowSettings(false)} class="text-neutral-400">
                 Done
               </button>
             </div>
@@ -799,9 +1064,11 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
                 {(track, i) => (
                   <div class="flex items-center gap-3">
                     <div
-                      class="w-3 h-3 rounded-full shrink-0"
+                      class="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-xs text-white font-bold"
                       style={{ "background-color": track.color }}
-                    />
+                    >
+                      {i() + 1}
+                    </div>
                     <span class="w-16 text-sm truncate">{track.name}</span>
                     <input
                       type="range"
@@ -817,7 +1084,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
                     <button
                       onClick={() => store.updateTrackSolo(i(), !track.solo)}
                       class={`w-8 h-8 rounded text-xs font-bold ${
-                        track.solo ? "bg-blue-500 text-white" : "bg-gray-700 text-gray-400"
+                        track.solo ? "bg-white text-black" : "bg-neutral-700 text-neutral-500"
                       }`}
                       title="Solo - isolate this track"
                     >
@@ -826,7 +1093,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
                     <button
                       onClick={() => store.updateTrackMute(i(), !track.muted)}
                       class={`w-8 h-8 rounded text-xs font-bold ${
-                        track.muted ? "bg-yellow-500 text-black" : "bg-gray-700 text-gray-400"
+                        track.muted ? "bg-selection text-black" : "bg-neutral-700 text-neutral-500"
                       }`}
                       title="Mute this track"
                     >
@@ -840,8 +1107,8 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
                       }}
                       class={`w-8 h-8 rounded text-xs font-bold ${
                         (store.currentMix()?.tracks.length || 0) > 1
-                          ? "bg-red-900 text-red-400 hover:bg-red-800"
-                          : "bg-gray-800 text-gray-600 cursor-not-allowed"
+                          ? "bg-neutral-800 text-destructive"
+                          : "bg-neutral-800 text-neutral-700 cursor-not-allowed"
                       }`}
                       disabled={(store.currentMix()?.tracks.length || 0) <= 1}
                       title={(store.currentMix()?.tracks.length || 0) <= 1 ? "Can't delete last track" : "Delete track"}
@@ -856,7 +1123,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
             <Show when={(store.currentMix()?.tracks.length || 0) < 8}>
               <button
                 onClick={() => store.addTrack()}
-                class="mt-6 w-full py-3 rounded-lg bg-gray-800 text-white"
+                class="mt-6 w-full py-3 rounded-lg bg-neutral-800 text-white"
               >
                 Add Track
               </button>
