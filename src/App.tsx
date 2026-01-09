@@ -1,49 +1,117 @@
 import { invoke } from "@tauri-apps/api/core";
 import { type Component, createSignal, For, onMount, Show } from "solid-js";
+import { EmptyState } from "./components/editor/EmptyState";
 import { MixEditor } from "./components/editor/MixEditor";
+import { Sidebar } from "./components/sidebar";
 import { useMixStore } from "./stores/mixStore";
+import { useVaultStore } from "./stores/vaultStore";
 import type { Mix, Track } from "./types/mix";
+import type { FolderEntry } from "./types/navigation";
 
-interface FolderEntry {
-  name: string;
-  path: string;
-  entry_type: "collection" | "project" | "mix" | "unknown";
-  modified_at: string | null;
-}
-
-// Extended entry with children for preview
+// Extended entry with children for tree view
 interface EntryWithChildren extends FolderEntry {
   children?: FolderEntry[];
 }
 
-// View modes: browser (collections), project (mixes inside a project), editor
-type ViewMode = "browser" | "project" | "editor";
+// View modes: browser (collections/mixes), editor (mix editing)
+type ViewMode = "browser" | "editor";
 
 const App: Component = () => {
   const store = useMixStore();
+  const vaultStore = useVaultStore();
   const [view, setView] = createSignal<ViewMode>("browser");
   const [currentPath, setCurrentPath] = createSignal<string>("");
   const [pathStack, setPathStack] = createSignal<string[]>([]);
   const [entries, setEntries] = createSignal<EntryWithChildren[]>([]);
-  const [isCreating, setIsCreating] = createSignal<
-    "mix" | "collection" | "project" | "select" | null
-  >(null);
+  const [isCreating, setIsCreating] = createSignal<"mix" | "collection" | "select" | null>(null);
   const [newName, setNewName] = createSignal("");
-  const [currentProject, setCurrentProject] = createSignal<FolderEntry | null>(null);
   const [menuEntry, setMenuEntry] = createSignal<FolderEntry | null>(null);
   const [confirmDelete, setConfirmDelete] = createSignal<FolderEntry | null>(null);
   const [searchQuery, setSearchQuery] = createSignal("");
   const [showSearch, setShowSearch] = createSignal(false);
   const [isDeleting, setIsDeleting] = createSignal(false);
+  const [showVaultPicker, setShowVaultPicker] = createSignal(false);
+
+  // Desktop file tree state
+  const [expandedPaths, setExpandedPaths] = createSignal<Set<string>>(new Set());
+  const [childrenMap, setChildrenMap] = createSignal<Map<string, FolderEntry[]>>(new Map());
+  const [selectedPaths, setSelectedPaths] = createSignal<Set<string>>(new Set());
+  const [lastSelectedPath, setLastSelectedPath] = createSignal<string | null>(null);
+  const [confirmDeleteSelected, setConfirmDeleteSelected] = createSignal(false);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = createSignal<{
+    x: number;
+    y: number;
+    entry: FolderEntry | null;
+  } | null>(null);
+  const [createTargetPath, setCreateTargetPath] = createSignal<string | null>(null);
+
+  // Drag-drop state (desktop)
+  const [draggedPaths, setDraggedPaths] = createSignal<string[]>([]);
+  const [_dropTarget, setDropTarget] = createSignal<string | null>(null);
+
+  // Drag-drop state (mobile)
+  const [mobileDragEntry, setMobileDragEntry] = createSignal<FolderEntry | null>(null);
+  const [mobileDragPos, setMobileDragPos] = createSignal<{ x: number; y: number } | null>(null);
+  const [mobileDropTarget, setMobileDropTarget] = createSignal<string | null>(null);
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+  let touchStartPos: { x: number; y: number } | null = null;
+
+  // Check if we're on mobile (< 768px)
+  const [isMobile, setIsMobile] = createSignal(window.innerWidth < 768);
 
   onMount(async () => {
+    // Listen for resize events
+    const handleResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener("resize", handleResize);
+
+    // Listen for clicks to close context menu
+    const handleClickOutside = () => setContextMenu(null);
+    window.addEventListener("click", handleClickOutside);
+
+    // Listen for Delete/Backspace key for deleting selected items (desktop only)
+    // and Escape to close context menu
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape closes context menu
+      if (e.key === "Escape") {
+        setContextMenu(null);
+        return;
+      }
+
+      if (isMobile()) return;
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedPaths().size > 0) {
+        // Don't trigger when typing in an input
+        if (
+          document.activeElement?.tagName === "INPUT" ||
+          document.activeElement?.tagName === "TEXTAREA"
+        ) {
+          return;
+        }
+        e.preventDefault();
+        setConfirmDeleteSelected(true);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
     try {
-      const path = await invoke<string>("get_default_projects_path");
+      // Load vaults first, then use active vault path
+      await vaultStore.loadVaults();
+      const path = await vaultStore.getActiveVaultPath();
       setCurrentPath(path);
       setPathStack([path]);
       await refreshEntries(path);
     } catch (e) {
-      console.error("Failed to get path:", e);
+      console.error("Failed to initialize:", e);
+      // Fallback to default path if vault loading fails
+      try {
+        const path = await invoke<string>("get_default_projects_path");
+        setCurrentPath(path);
+        setPathStack([path]);
+        await refreshEntries(path);
+      } catch (fallbackError) {
+        console.error("Failed to get fallback path:", fallbackError);
+      }
     }
   });
 
@@ -51,7 +119,7 @@ const App: Component = () => {
     try {
       const items = await invoke<FolderEntry[]>("list_entries", { path });
 
-      // Load one level of children for collections
+      // Load one level of children for collections (for mobile preview)
       const entriesWithChildren: EntryWithChildren[] = await Promise.all(
         items.map(async (entry) => {
           if (entry.entry_type === "collection") {
@@ -67,8 +135,122 @@ const App: Component = () => {
       );
 
       setEntries(entriesWithChildren);
+
+      // Also update children map for desktop tree
+      const newMap = new Map(childrenMap());
+      newMap.set(path, items);
+      setChildrenMap(newMap);
     } catch (e) {
       console.error("Failed to list entries:", e);
+    }
+  };
+
+  // Load children for a folder (for desktop tree)
+  const loadChildrenFor = async (folderPath: string) => {
+    try {
+      const items = await invoke<FolderEntry[]>("list_entries", { path: folderPath });
+      const newMap = new Map(childrenMap());
+      newMap.set(folderPath, items);
+      setChildrenMap(newMap);
+    } catch (e) {
+      console.error("Failed to load children:", e);
+    }
+  };
+
+  // Get children for a path (for tree view)
+  const getChildren = (path: string): FolderEntry[] | undefined => {
+    return childrenMap().get(path);
+  };
+
+  // Get all visible mix paths in order (for shift-click range selection)
+  const getVisibleMixPaths = (): string[] => {
+    const result: string[] = [];
+    const sortEntries = (items: FolderEntry[]): FolderEntry[] => {
+      const order: Record<string, number> = { collection: 0, mix: 1, unknown: 2 };
+      return [...items].sort((a, b) => {
+        const orderDiff = (order[a.entry_type] ?? 2) - (order[b.entry_type] ?? 2);
+        if (orderDiff !== 0) return orderDiff;
+        return a.name.localeCompare(b.name);
+      });
+    };
+
+    const traverse = (items: FolderEntry[]) => {
+      for (const item of sortEntries(items)) {
+        if (item.entry_type === "mix") {
+          result.push(item.path);
+        } else if (item.entry_type === "collection" && expandedPaths().has(item.path)) {
+          const children = childrenMap().get(item.path);
+          if (children) {
+            traverse(children);
+          }
+        }
+      }
+    };
+
+    traverse(entries());
+    return result;
+  };
+
+  // Handle tree expand/collapse
+  const handleToggleExpand = async (path: string) => {
+    const newSet = new Set(expandedPaths());
+    if (newSet.has(path)) {
+      newSet.delete(path);
+    } else {
+      newSet.add(path);
+      // Load children if not already loaded
+      if (!childrenMap().has(path)) {
+        await loadChildrenFor(path);
+      }
+    }
+    setExpandedPaths(newSet);
+  };
+
+  // Handle tree item selection (desktop) with multi-select
+  const handleTreeSelect = async (
+    entry: FolderEntry,
+    modifiers: { shift: boolean; meta: boolean },
+  ) => {
+    if (entry.entry_type !== "mix") return;
+
+    if (modifiers.shift && lastSelectedPath()) {
+      // Range select: select all items between last and current
+      const visiblePaths = getVisibleMixPaths();
+      const lastIdx = visiblePaths.indexOf(lastSelectedPath()!);
+      const currentIdx = visiblePaths.indexOf(entry.path);
+
+      if (lastIdx !== -1 && currentIdx !== -1) {
+        const start = Math.min(lastIdx, currentIdx);
+        const end = Math.max(lastIdx, currentIdx);
+        const rangePaths = visiblePaths.slice(start, end + 1);
+
+        const newSet = new Set(selectedPaths());
+        for (const p of rangePaths) {
+          newSet.add(p);
+        }
+        setSelectedPaths(newSet);
+      }
+    } else if (modifiers.meta) {
+      // Toggle: add/remove from selection
+      const newSet = new Set(selectedPaths());
+      if (newSet.has(entry.path)) {
+        newSet.delete(entry.path);
+      } else {
+        newSet.add(entry.path);
+      }
+      setSelectedPaths(newSet);
+      setLastSelectedPath(entry.path);
+    } else {
+      // Normal click: select only this item and load it
+      setSelectedPaths(new Set([entry.path]));
+      setLastSelectedPath(entry.path);
+
+      try {
+        await store.loadMix(entry.path);
+      } catch (e) {
+        console.error("Failed to load mix:", e);
+        setSelectedPaths(new Set());
+      }
     }
   };
 
@@ -99,36 +281,12 @@ const App: Component = () => {
       setView("editor");
       store.loadMix(entry.path).catch((e) => {
         console.error("Failed to load mix:", e);
-        // Go back to previous view on error
-        const project = currentProject();
-        if (project) {
-          setView("project");
-        } else {
-          setView("browser");
-        }
+        setView("browser");
       });
-    } else if (entry.entry_type === "project") {
-      // Open project view (shows mixes inside)
-      setCurrentProject(entry);
-      setCurrentPath(entry.path);
-      setView("project"); // Set view first
-      // Load entries in background
-      invoke<FolderEntry[]>("list_entries", { path: entry.path })
-        .then((items) => setEntries(items))
-        .catch((e) => console.error("Failed to load project entries:", e));
     } else if (entry.entry_type === "collection") {
       // Navigate into collection
       await navigateTo(entry.path);
     }
-  };
-
-  const navigateBackFromProject = async () => {
-    const stack = pathStack();
-    const parentPath = stack.length > 0 ? stack[stack.length - 1] : currentPath();
-    setCurrentProject(null);
-    setCurrentPath(parentPath);
-    await refreshEntries(parentPath);
-    setView("browser");
   };
 
   const handleCreate = async () => {
@@ -136,26 +294,84 @@ const App: Component = () => {
     const type = isCreating();
     if (!name || !type) return;
 
+    // Use target path if set (from context menu), otherwise current path
+    const targetPath = createTargetPath() || currentPath();
+
     try {
       if (type === "collection") {
-        await invoke("create_collection", { name, parentPath: currentPath() });
+        await invoke("create_collection", { name, parentPath: targetPath });
+        // Refresh both current view and target if different
         await refreshEntries(currentPath());
-      } else if (type === "project") {
-        // Create project folder with project.json
-        await invoke("create_project_folder", { name, parentPath: currentPath() });
-        await refreshEntries(currentPath());
+        if (targetPath !== currentPath() && childrenMap().has(targetPath)) {
+          const items = await invoke<FolderEntry[]>("list_entries", { path: targetPath });
+          const newMap = new Map(childrenMap());
+          newMap.set(targetPath, items);
+          setChildrenMap(newMap);
+        }
       } else if (type === "mix") {
-        // Mix creation - use project path if in project view, otherwise current path
-        const project = currentProject();
-        const parentPath = project ? project.path : currentPath();
-        await store.createMix(name, parentPath);
-        setView("editor");
+        await store.createMix(name, targetPath);
+        if (isMobile()) {
+          setView("editor");
+        } else {
+          // Desktop: select the new mix in tree
+          const mixPath = store.mixPath();
+          if (mixPath) {
+            setSelectedPaths(new Set([mixPath]));
+            setLastSelectedPath(mixPath);
+          }
+          // Refresh target folder if it's loaded
+          if (targetPath !== currentPath() && childrenMap().has(targetPath)) {
+            const items = await invoke<FolderEntry[]>("list_entries", { path: targetPath });
+            const newMap = new Map(childrenMap());
+            newMap.set(targetPath, items);
+            setChildrenMap(newMap);
+          }
+        }
       }
       setNewName("");
       setIsCreating(null);
+      setCreateTargetPath(null);
     } catch (e) {
       console.error("Failed to create:", e);
     }
+  };
+
+  // Create an untitled mix and start recording (for empty state)
+  const handleAutoCreateAndRecord = async () => {
+    try {
+      // Find a unique name
+      const vaultPath = await vaultStore.getActiveVaultPath();
+      let name = "Untitled";
+      let counter = 1;
+
+      // Check existing mixes to find unique name
+      const existing = entries().filter((e) => e.entry_type === "mix");
+      const existingNames = new Set(existing.map((e) => e.name));
+      while (existingNames.has(name)) {
+        counter++;
+        name = `Untitled ${counter}`;
+      }
+
+      // Create the mix
+      await store.createMix(name, vaultPath);
+
+      // Refresh entries for tree
+      await refreshEntries(vaultPath);
+
+      // Select the new mix
+      const mixPath = store.mixPath();
+      if (mixPath) {
+        setSelectedPaths(new Set([mixPath]));
+        setLastSelectedPath(mixPath);
+      }
+    } catch (e) {
+      console.error("Failed to auto-create mix:", e);
+    }
+  };
+
+  // Create new mix from empty state (desktop)
+  const handleCreateNewMix = () => {
+    setIsCreating("mix");
   };
 
   const handleDone = async () => {
@@ -164,14 +380,12 @@ const App: Component = () => {
     } catch (e) {
       console.error("Save failed:", e);
     }
-    const project = currentProject();
-    if (project) {
-      await refreshEntries(project.path);
-      setView("project");
-    } else {
+
+    if (isMobile()) {
       await refreshEntries(currentPath());
       setView("browser");
     }
+    // On desktop, don't change view - mix stays in editor
   };
 
   const handleDelete = async (entry: FolderEntry) => {
@@ -180,14 +394,7 @@ const App: Component = () => {
       await invoke("delete_entry", { entryPath: entry.path });
       setConfirmDelete(null);
       setMenuEntry(null);
-      // Refresh the current view
-      const project = currentProject();
-      if (project) {
-        const items = await invoke<FolderEntry[]>("list_entries", { path: project.path });
-        setEntries(items);
-      } else {
-        await refreshEntries(currentPath());
-      }
+      await refreshEntries(currentPath());
     } catch (e) {
       console.error("Delete failed:", e);
       alert(`Failed to delete: ${e}`);
@@ -206,8 +413,6 @@ const App: Component = () => {
     switch (type) {
       case "collection":
         return "Collection";
-      case "project":
-        return "Project";
       case "mix":
         return "Mix";
       default:
@@ -222,43 +427,358 @@ const App: Component = () => {
     return entries().filter((e) => e.name.toLowerCase().includes(query));
   };
 
-  // Get mixes from current entries (for project view)
-  const mixEntries = () => entries().filter((e) => e.entry_type === "mix");
+  // Switch to a different vault
+  const handleVaultSwitch = async (vaultId: string) => {
+    if (vaultId !== vaultStore.activeVault()?.id) {
+      await vaultStore.switchVault(vaultId);
+      const path = await vaultStore.getActiveVaultPath();
+      setCurrentPath(path);
+      setPathStack([path]);
+      setView("browser");
+      setSelectedPaths(new Set());
+      setLastSelectedPath(null);
+      store.clearMix();
+      // Reset tree state
+      setExpandedPaths(new Set());
+      setChildrenMap(new Map());
+      await refreshEntries(path);
+    }
+    setShowVaultPicker(false);
+  };
+
+  // Delete selected items (desktop)
+  const handleDeleteSelected = async () => {
+    const paths = Array.from(selectedPaths());
+    if (paths.length === 0) return;
+
+    setIsDeleting(true);
+    try {
+      for (const path of paths) {
+        await invoke("delete_entry", { entryPath: path });
+      }
+      setSelectedPaths(new Set());
+      setLastSelectedPath(null);
+      setConfirmDeleteSelected(false);
+      store.clearMix();
+      await refreshEntries(currentPath());
+    } catch (e) {
+      console.error("Delete failed:", e);
+      alert(`Failed to delete: ${e}`);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Context menu handler (desktop)
+  const handleContextMenu = (entry: FolderEntry | null, x: number, y: number) => {
+    // If right-clicking on an item that's not in selection, select it
+    if (entry && !selectedPaths().has(entry.path)) {
+      setSelectedPaths(new Set([entry.path]));
+      setLastSelectedPath(entry.path);
+    }
+    setContextMenu({ x, y, entry });
+  };
+
+  // Context menu action: create mix/collection in folder
+  const handleCreateInFolder = (type: "mix" | "collection", folderPath: string) => {
+    setCreateTargetPath(folderPath);
+    setIsCreating(type);
+    setContextMenu(null);
+  };
+
+  // Context menu action: delete selected
+  const handleContextDelete = () => {
+    setContextMenu(null);
+    if (selectedPaths().size > 0) {
+      setConfirmDeleteSelected(true);
+    }
+  };
+
+  // Drag-drop handlers
+  const handleDragStart = (entry: FolderEntry) => {
+    // If dragging something not in selection, drag only that item
+    if (selectedPaths().has(entry.path)) {
+      setDraggedPaths(Array.from(selectedPaths()));
+    } else {
+      setDraggedPaths([entry.path]);
+    }
+  };
+
+  const handleDragOver = (entry: FolderEntry | null) => {
+    if (entry) {
+      setDropTarget(entry.path);
+    } else {
+      // Dropping on root (vault path)
+      setDropTarget(currentPath());
+    }
+  };
+
+  const handleDrop = async (targetEntry: FolderEntry | null) => {
+    const targetPath = targetEntry ? targetEntry.path : currentPath();
+    const paths = draggedPaths();
+
+    if (paths.length === 0) {
+      setDraggedPaths([]);
+      setDropTarget(null);
+      return;
+    }
+
+    // Don't drop onto self or own children
+    for (const sourcePath of paths) {
+      if (targetPath === sourcePath || targetPath.startsWith(`${sourcePath}/`)) {
+        setDraggedPaths([]);
+        setDropTarget(null);
+        return;
+      }
+    }
+
+    try {
+      for (const sourcePath of paths) {
+        await invoke("move_entry", { sourcePath, destFolder: targetPath });
+      }
+      setSelectedPaths(new Set());
+      setLastSelectedPath(null);
+      await refreshEntries(currentPath());
+      // Also refresh destination if it's loaded
+      if (childrenMap().has(targetPath)) {
+        const items = await invoke<FolderEntry[]>("list_entries", { path: targetPath });
+        const newMap = new Map(childrenMap());
+        newMap.set(targetPath, items);
+        setChildrenMap(newMap);
+      }
+    } catch (e) {
+      console.error("Move failed:", e);
+      alert(`Failed to move: ${e}`);
+    } finally {
+      setDraggedPaths([]);
+      setDropTarget(null);
+    }
+  };
+
+  // Mobile drag-drop handlers
+  const handleMobileTouchStart = (entry: FolderEntry, e: TouchEvent) => {
+    const touch = e.touches[0];
+    touchStartPos = { x: touch.clientX, y: touch.clientY };
+
+    // Start long press timer (500ms to initiate drag)
+    longPressTimer = setTimeout(() => {
+      setMobileDragEntry(entry);
+      setMobileDragPos({ x: touch.clientX, y: touch.clientY });
+      // Haptic feedback if available
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+    }, 500);
+  };
+
+  const handleMobileTouchMove = (e: TouchEvent) => {
+    const touch = e.touches[0];
+
+    // If we haven't started dragging yet, check if we moved too far (cancel long press)
+    if (!mobileDragEntry() && touchStartPos) {
+      const dx = touch.clientX - touchStartPos.x;
+      const dy = touch.clientY - touchStartPos.y;
+      if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+        // User is scrolling, cancel long press
+        if (longPressTimer) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+        return;
+      }
+    }
+
+    // If we're dragging, update position and find drop target
+    if (mobileDragEntry()) {
+      e.preventDefault(); // Prevent scrolling while dragging
+      setMobileDragPos({ x: touch.clientX, y: touch.clientY });
+
+      // Find element under touch point
+      const elemBelow = document.elementFromPoint(touch.clientX, touch.clientY);
+      const dropTargetEl = elemBelow?.closest("[data-drop-target]");
+
+      if (dropTargetEl) {
+        const targetPath = dropTargetEl.getAttribute("data-drop-target");
+        // Can't drop onto self
+        if (targetPath && targetPath !== mobileDragEntry()?.path) {
+          setMobileDropTarget(targetPath);
+        } else {
+          setMobileDropTarget(null);
+        }
+      } else {
+        setMobileDropTarget(null);
+      }
+    }
+  };
+
+  const handleMobileTouchEnd = async () => {
+    // Clear long press timer
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    touchStartPos = null;
+
+    const dragEntry = mobileDragEntry();
+    const dropPath = mobileDropTarget();
+
+    // Reset drag state
+    setMobileDragEntry(null);
+    setMobileDragPos(null);
+    setMobileDropTarget(null);
+
+    // Execute move if we have valid source and target
+    if (dragEntry && dropPath) {
+      try {
+        await invoke("move_entry", {
+          sourcePath: dragEntry.path,
+          destFolder: dropPath,
+        });
+        await refreshEntries(currentPath());
+      } catch (e) {
+        console.error("Move failed:", e);
+        alert(`Failed to move: ${e}`);
+      }
+    }
+  };
+
+  const handleMobileTouchCancel = () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+    touchStartPos = null;
+    setMobileDragEntry(null);
+    setMobileDragPos(null);
+    setMobileDropTarget(null);
+  };
 
   return (
     <div class="h-screen bg-black text-white">
-      <Show when={view() === "editor"}>
-        <Show
-          when={store.currentMix()}
-          fallback={
-            <div class="h-full flex items-center justify-center bg-black">
-              <div class="text-neutral-400">Loading...</div>
-            </div>
-          }
-        >
-          <MixEditor onDone={handleDone} />
-        </Show>
+      {/* ===== DESKTOP LAYOUT (md: and up) ===== */}
+      <Show when={!isMobile()}>
+        <div class="h-full flex">
+          {/* Sidebar with file tree */}
+          <Sidebar
+            entries={entries()}
+            expandedPaths={expandedPaths()}
+            selectedPaths={selectedPaths()}
+            onToggleExpand={handleToggleExpand}
+            onSelect={handleTreeSelect}
+            getChildren={getChildren}
+            activeVault={vaultStore.activeVault()}
+            onManageVaults={() => setShowVaultPicker(true)}
+            onDeleteSelected={() => setConfirmDeleteSelected(true)}
+            onContextMenu={handleContextMenu}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+          />
+
+          {/* Main Content Area */}
+          <div class="flex-1 flex flex-col min-w-0">
+            <Show
+              when={store.currentMix()}
+              fallback={
+                <EmptyState onRecord={handleAutoCreateAndRecord} onCreateNew={handleCreateNewMix} />
+              }
+            >
+              <MixEditor onDone={handleDone} inline />
+            </Show>
+          </div>
+        </div>
       </Show>
 
-      <Show when={view() === "browser"}>
-        <div
-          class="h-full flex flex-col bg-black relative"
-          style={{
-            "padding-top": "env(safe-area-inset-top, 0px)",
-            "padding-bottom": "env(safe-area-inset-bottom, 0px)",
-          }}
-        >
-          {/* Header */}
-          <div class="flex items-center justify-between px-4 py-4 gap-3">
-            <Show when={!showSearch()}>
-              <div class="flex items-center gap-3 flex-1 min-w-0">
-                <Show when={pathStack().length > 1}>
-                  <button
-                    onClick={navigateBack}
-                    class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center shrink-0"
-                  >
+      {/* ===== MOBILE LAYOUT ===== */}
+      <Show when={isMobile()}>
+        <Show when={view() === "editor"}>
+          <Show
+            when={store.currentMix()}
+            fallback={
+              <div class="h-full flex items-center justify-center bg-black">
+                <div class="text-neutral-400">Loading...</div>
+              </div>
+            }
+          >
+            <MixEditor onDone={handleDone} breadcrumb={currentFolderName()} />
+          </Show>
+        </Show>
+
+        <Show when={view() === "browser"}>
+          <div
+            class="h-full flex flex-col bg-black"
+            style={{
+              "padding-top": "env(safe-area-inset-top, 0px)",
+              "padding-bottom": "env(safe-area-inset-bottom, 0px)",
+            }}
+          >
+            {/* Header */}
+            <div class="flex items-center justify-between px-4 py-4 gap-3">
+              <Show when={!showSearch()}>
+                <div class="flex items-center gap-3 flex-1 min-w-0">
+                  <Show when={pathStack().length > 1}>
+                    <button
+                      onClick={navigateBack}
+                      class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center shrink-0"
+                    >
+                      <svg
+                        class="w-5 h-5 text-neutral-300"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M15 19l-7-7 7-7"
+                        />
+                      </svg>
+                    </button>
+                  </Show>
+                  <div class="flex-1 min-w-0">
+                    <h1 class="text-2xl font-bold truncate">{currentFolderName()}</h1>
+                    {/* Vault indicator */}
+                    <Show when={vaultStore.activeVault()}>
+                      <button
+                        onClick={() => setShowVaultPicker(true)}
+                        class="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-400"
+                      >
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+                          />
+                        </svg>
+                        <span>{vaultStore.activeVault()?.name}</span>
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M19 9l-7 7-7-7"
+                          />
+                        </svg>
+                      </button>
+                    </Show>
+                  </div>
+                </div>
+              </Show>
+              <Show when={showSearch()}>
+                <div class="flex-1 flex items-center gap-2">
+                  <div class="flex-1 relative">
+                    <input
+                      type="text"
+                      value={searchQuery()}
+                      onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                      placeholder="Search..."
+                      class="w-full pl-10 pr-4 py-2.5 bg-neutral-800 rounded-full text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-600"
+                      autofocus
+                    />
                     <svg
-                      class="w-5 h-5 text-neutral-300"
+                      class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
                       fill="none"
                       stroke="currentColor"
                       viewBox="0 0 24 24"
@@ -267,27 +787,23 @@ const App: Component = () => {
                         stroke-linecap="round"
                         stroke-linejoin="round"
                         stroke-width="2"
-                        d="M15 19l-7-7 7-7"
+                        d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                       />
                     </svg>
-                  </button>
-                </Show>
-                <h1 class="text-2xl font-bold truncate">{currentFolderName()}</h1>
-              </div>
-            </Show>
-            <Show when={showSearch()}>
-              <div class="flex-1 flex items-center gap-2">
-                <div class="flex-1 relative">
-                  <input
-                    type="text"
-                    value={searchQuery()}
-                    onInput={(e) => setSearchQuery(e.currentTarget.value)}
-                    placeholder="Search..."
-                    class="w-full pl-10 pr-4 py-2.5 bg-neutral-800 rounded-full text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-600"
-                    autofocus
-                  />
+                  </div>
+                </div>
+              </Show>
+              {/* Search button */}
+              <button
+                onClick={() => {
+                  setShowSearch(!showSearch());
+                  if (showSearch()) setSearchQuery("");
+                }}
+                class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center shrink-0"
+              >
+                <Show when={!showSearch()}>
                   <svg
-                    class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                    class="w-5 h-5 text-neutral-300"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -299,57 +815,10 @@ const App: Component = () => {
                       d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
                     />
                   </svg>
-                </div>
-              </div>
-            </Show>
-            <button
-              onClick={() => {
-                setShowSearch(!showSearch());
-                if (showSearch()) setSearchQuery("");
-              }}
-              class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center shrink-0"
-            >
-              <Show when={!showSearch()}>
-                <svg
-                  class="w-5 h-5 text-neutral-300"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
-                </svg>
-              </Show>
-              <Show when={showSearch()}>
-                <svg
-                  class="w-5 h-5 text-neutral-300"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </Show>
-            </button>
-          </div>
-
-          {/* List View */}
-          <div class="flex-1 overflow-y-auto pb-24">
-            <Show
-              when={entries().length > 0}
-              fallback={
-                <div class="flex flex-col items-center justify-center h-full text-neutral-500">
+                </Show>
+                <Show when={showSearch()}>
                   <svg
-                    class="w-16 h-16 mb-4 opacity-30"
+                    class="w-5 h-5 text-neutral-300"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -357,349 +826,326 @@ const App: Component = () => {
                     <path
                       stroke-linecap="round"
                       stroke-linejoin="round"
-                      stroke-width="1"
-                      d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                      stroke-width="2"
+                      d="M6 18L18 6M6 6l12 12"
                     />
                   </svg>
-                  <p class="text-lg mb-1">No items yet</p>
-                  <p class="text-sm text-neutral-600">Tap + Add to get started</p>
-                </div>
-              }
-            >
-              <div class="divide-y divide-neutral-800">
-                {/* Sort: collections first, then projects, then mixes */}
-                <For
-                  each={[...filteredEntries()].sort((a, b) => {
-                    const order = { collection: 0, project: 1, mix: 2, unknown: 3 };
-                    return (order[a.entry_type] || 3) - (order[b.entry_type] || 3);
-                  })}
-                >
-                  {(entry) => {
-                    const isFolder = entry.entry_type === "collection";
-                    const isMix = entry.entry_type === "mix";
-                    const isProject = entry.entry_type === "project";
+                </Show>
+              </button>
+            </div>
 
-                    return (
-                      <div
-                        class="flex items-center gap-3 px-4 py-3 active:bg-neutral-900"
-                        onClick={() => handleEntryClick(entry)}
-                      >
-                        {/* Icon */}
+            {/* List View */}
+            <div class="flex-1 overflow-y-auto pb-24">
+              <Show
+                when={entries().length > 0}
+                fallback={
+                  <div class="flex flex-col items-center justify-center h-full text-neutral-500">
+                    <svg
+                      class="w-16 h-16 mb-4 opacity-30"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1"
+                        d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                      />
+                    </svg>
+                    <p class="text-lg mb-1">No items yet</p>
+                    <p class="text-sm text-neutral-600">Tap + Add to get started</p>
+                  </div>
+                }
+              >
+                <div class="divide-y divide-neutral-800">
+                  {/* Sort: collections first, then mixes, alphabetically within each */}
+                  <For
+                    each={[...filteredEntries()].sort((a, b) => {
+                      const order = { collection: 0, mix: 1, unknown: 2 };
+                      const orderDiff = (order[a.entry_type] || 2) - (order[b.entry_type] || 2);
+                      if (orderDiff !== 0) return orderDiff;
+                      return a.name.localeCompare(b.name);
+                    })}
+                  >
+                    {(entry) => {
+                      const isFolder = entry.entry_type === "collection";
+                      const isMix = entry.entry_type === "mix";
+                      const isDragging = () => mobileDragEntry()?.path === entry.path;
+                      const isDropTarget = () => mobileDropTarget() === entry.path;
+
+                      return (
                         <div
-                          class={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                            isMix
-                              ? "bg-neutral-800"
-                              : isProject
-                                ? "bg-neutral-800"
-                                : "bg-neutral-800"
-                          }`}
+                          class={`flex items-center gap-3 px-4 py-3 active:bg-neutral-900 transition-all ${
+                            isDragging() ? "opacity-50" : ""
+                          } ${isDropTarget() ? "bg-blue-500/20 ring-2 ring-blue-500 ring-inset" : ""}`}
+                          data-drop-target={isFolder ? entry.path : undefined}
+                          onClick={() => !mobileDragEntry() && handleEntryClick(entry)}
+                          onTouchStart={(e) => handleMobileTouchStart(entry, e)}
+                          onTouchMove={handleMobileTouchMove}
+                          onTouchEnd={handleMobileTouchEnd}
+                          onTouchCancel={handleMobileTouchCancel}
                         >
-                          <Show when={isMix}>
-                            <svg
-                              class="w-6 h-6 text-neutral-400"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="1.5"
-                                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
-                              />
-                            </svg>
-                          </Show>
-                          <Show when={isProject}>
-                            <svg
-                              class="w-6 h-6 text-neutral-400"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="1.5"
-                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                              />
-                            </svg>
-                          </Show>
-                          <Show when={isFolder}>
-                            <svg
-                              class="w-6 h-6 text-neutral-400"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                stroke-width="1.5"
-                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-                              />
-                            </svg>
-                          </Show>
-                        </div>
-
-                        {/* Content */}
-                        <div class="flex-1 min-w-0">
-                          <div class="font-medium text-neutral-200 truncate">{entry.name}</div>
-                          <div class="text-sm text-neutral-500">
-                            <Show when={isFolder}>{entry.children?.length || 0} items</Show>
-                            <Show when={isProject}>Project</Show>
+                          {/* Icon */}
+                          <div class="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 bg-neutral-800">
                             <Show when={isMix}>
-                              {entry.modified_at
-                                ? new Date(entry.modified_at).toLocaleDateString("en-US", {
-                                    month: "short",
-                                    day: "numeric",
-                                  })
-                                : "Mix"}
+                              <svg
+                                class="w-6 h-6 text-neutral-400"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  stroke-width="1.5"
+                                  d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                                />
+                              </svg>
+                            </Show>
+                            <Show when={isFolder}>
+                              <svg
+                                class="w-6 h-6 text-neutral-400"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path
+                                  stroke-linecap="round"
+                                  stroke-linejoin="round"
+                                  stroke-width="1.5"
+                                  d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                                />
+                              </svg>
                             </Show>
                           </div>
-                        </div>
 
-                        {/* Chevron for folders/projects, play for mixes */}
-                        <Show when={!isMix}>
-                          <svg
-                            class="w-5 h-5 text-neutral-600"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M9 5l7 7-7 7"
-                            />
-                          </svg>
-                        </Show>
-                        <Show when={isMix}>
+                          {/* Content */}
+                          <div class="flex-1 min-w-0">
+                            <div class="font-medium text-neutral-200 truncate">{entry.name}</div>
+                            <div class="text-sm text-neutral-500">
+                              <Show when={isFolder}>{entry.children?.length || 0} items</Show>
+                              <Show when={isMix}>
+                                {entry.modified_at
+                                  ? new Date(entry.modified_at).toLocaleDateString("en-US", {
+                                      month: "short",
+                                      day: "numeric",
+                                    })
+                                  : "Mix"}
+                              </Show>
+                            </div>
+                          </div>
+
+                          {/* Chevron for collections, play for mixes */}
+                          <Show when={!isMix}>
+                            <svg
+                              class="w-5 h-5 text-neutral-600"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="2"
+                                d="M9 5l7 7-7 7"
+                              />
+                            </svg>
+                          </Show>
+                          <Show when={isMix}>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleEntryClick(entry);
+                              }}
+                              class="w-10 h-10 rounded-full bg-neutral-700 flex items-center justify-center"
+                            >
+                              <svg
+                                class="w-4 h-4 ml-0.5 text-white"
+                                fill="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <path d="M8 5.14v14l11-7-11-7z" />
+                              </svg>
+                            </button>
+                          </Show>
+
+                          {/* Menu button */}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleEntryClick(entry);
+                              setMenuEntry(entry);
                             }}
-                            class="w-10 h-10 rounded-full bg-neutral-700 flex items-center justify-center"
+                            class="w-8 h-8 flex items-center justify-center text-neutral-600"
                           >
-                            <svg
-                              class="w-4 h-4 ml-0.5 text-white"
-                              fill="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path d="M8 5.14v14l11-7-11-7z" />
+                            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                              <circle cx="12" cy="6" r="1.5" />
+                              <circle cx="12" cy="12" r="1.5" />
+                              <circle cx="12" cy="18" r="1.5" />
                             </svg>
                           </button>
-                        </Show>
-
-                        {/* Menu button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setMenuEntry(entry);
-                          }}
-                          class="w-8 h-8 flex items-center justify-center text-neutral-600"
-                        >
-                          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                            <circle cx="12" cy="6" r="1.5" />
-                            <circle cx="12" cy="12" r="1.5" />
-                            <circle cx="12" cy="18" r="1.5" />
-                          </svg>
-                        </button>
-                      </div>
-                    );
-                  }}
-                </For>
-              </div>
-            </Show>
+                        </div>
+                      );
+                    }}
+                  </For>
+                </div>
+              </Show>
+            </div>
           </div>
-        </div>
-      </Show>
+        </Show>
 
-      {/* Floating Add Button - iOS style */}
-      <Show when={view() === "browser"}>
-        <div
-          class="fixed left-1/2 -translate-x-1/2 z-50"
-          style={{ bottom: "calc(24px + env(safe-area-inset-bottom, 0px))" }}
-        >
-          <button
-            onClick={() => setIsCreating("select")}
-            class="px-6 py-3 rounded-full bg-neutral-800 text-white font-medium flex items-center gap-2 shadow-elevated"
+        {/* Floating Add Button */}
+        <Show when={view() === "browser"}>
+          <div
+            class="fixed left-1/2 -translate-x-1/2 z-50"
+            style={{ bottom: "calc(24px + env(safe-area-inset-bottom, 0px))" }}
           >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                stroke-width="2"
-                d="M12 4v16m8-8H4"
-              />
-            </svg>
-            Add
-          </button>
-        </div>
-      </Show>
-
-      {/* Project View - Clean minimal style */}
-      <Show when={view() === "project"}>
-        <div
-          class="h-full flex flex-col bg-black"
-          style={{
-            "padding-top": "env(safe-area-inset-top, 0px)",
-            "padding-bottom": "env(safe-area-inset-bottom, 0px)",
-          }}
-        >
-          {/* Header with back button */}
-          <div class="flex items-center px-4 py-3">
             <button
-              onClick={navigateBackFromProject}
-              class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center"
+              onClick={() => setIsCreating("select")}
+              class="px-6 py-3 rounded-full bg-neutral-800 text-white font-medium flex items-center gap-2 shadow-elevated"
             >
-              <svg
-                class="w-5 h-5 text-neutral-300"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   stroke-width="2"
-                  d="M15 19l-7-7 7-7"
+                  d="M12 4v16m8-8H4"
                 />
               </svg>
+              Add
             </button>
           </div>
+        </Show>
 
-          {/* Scrollable content */}
-          <div class="flex-1 overflow-y-auto">
-            {/* Clean project artwork - simple dark card */}
-            <div class="px-8 pb-6">
-              <div class="aspect-square w-full max-w-[280px] mx-auto rounded-xl shadow-elevated bg-neutral-900 flex items-center justify-center">
-                <svg
-                  class="w-24 h-24 text-neutral-700"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="1"
-                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                  />
-                </svg>
-              </div>
-            </div>
-
-            {/* Project info */}
-            <div class="px-4 pb-4">
-              <div class="flex items-end justify-between">
-                <div class="flex-1">
-                  <h1 class="text-2xl font-bold mb-1">{currentProject()?.name || "Project"}</h1>
-                  <p class="text-sm text-neutral-500">{mixEntries().length} mixes</p>
+        {/* Mobile Drag Ghost - floating element that follows finger */}
+        <Show when={mobileDragEntry() && mobileDragPos()}>
+          {(_) => {
+            const entry = mobileDragEntry()!;
+            const pos = mobileDragPos()!;
+            const isMixEntry = entry.entry_type === "mix";
+            return (
+              <div
+                class="fixed z-[100] pointer-events-none"
+                style={{
+                  left: `${pos.x - 30}px`,
+                  top: `${pos.y - 30}px`,
+                }}
+              >
+                <div class="w-16 h-16 rounded-2xl bg-neutral-800 border-2 border-blue-500 shadow-xl flex flex-col items-center justify-center">
+                  <Show when={isMixEntry}>
+                    <svg
+                      class="w-6 h-6 text-blue-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.5"
+                        d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                      />
+                    </svg>
+                  </Show>
+                  <Show when={!isMixEntry}>
+                    <svg
+                      class="w-6 h-6 text-blue-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="1.5"
+                        d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                      />
+                    </svg>
+                  </Show>
+                  <span class="text-[10px] text-neutral-400 mt-0.5 truncate max-w-14 px-1">
+                    {entry.name}
+                  </span>
                 </div>
-                <button class="w-14 h-14 rounded-full bg-white flex items-center justify-center shadow-card">
-                  <svg class="w-7 h-7 text-black ml-1" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M8 5.14v14l11-7-11-7z" />
-                  </svg>
-                </button>
               </div>
-            </div>
+            );
+          }}
+        </Show>
+      </Show>
 
-            {/* Add mix button */}
-            <div class="px-4 pb-4">
-              <button
-                onClick={() => setIsCreating("mix")}
-                class="w-full py-3 rounded-xl bg-neutral-900 text-neutral-300 font-medium flex items-center justify-center gap-2"
-              >
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    stroke-width="2"
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-                Add mix
-              </button>
-            </div>
+      {/* ===== DESKTOP CONTEXT MENU ===== */}
+      <Show when={contextMenu()}>
+        {(menu) => {
+          const entry = menu().entry;
+          const isCollection = entry?.entry_type === "collection";
+          const hasSelection = selectedPaths().size > 0;
 
-            {/* Mix list */}
-            <div class="px-4">
-              <Show
-                when={mixEntries().length > 0}
-                fallback={
-                  <div class="text-center py-12 text-neutral-500">
-                    <p class="text-sm">No mixes yet</p>
-                    <p class="text-xs mt-1 text-neutral-600">
-                      Tap "Add mix" to create your first recording
-                    </p>
-                  </div>
-                }
-              >
-                <For each={mixEntries()}>
-                  {(entry, idx) => (
-                    <div class="w-full flex items-center gap-3 py-2">
-                      <span class="w-6 text-center text-neutral-600 text-sm">{idx() + 1}</span>
-                      {/* Play button */}
-                      <button
-                        onClick={() => handleEntryClick(entry)}
-                        class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center"
-                      >
-                        <svg
-                          class="w-4 h-4 ml-0.5 text-neutral-300"
-                          fill="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path d="M8 5.14v14l11-7-11-7z" />
-                        </svg>
-                      </button>
-                      <div onClick={() => handleEntryClick(entry)} class="flex-1 cursor-pointer">
-                        <div class="font-medium text-neutral-200">{entry.name}</div>
-                        <div class="text-sm text-neutral-500 flex items-center gap-1">
-                          <svg
-                            class="w-3.5 h-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              stroke-width="2"
-                              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-                            />
-                          </svg>
-                          {entry.modified_at
-                            ? new Date(entry.modified_at).toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              })
-                            : "No date"}
-                        </div>
-                      </div>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setMenuEntry(entry);
-                        }}
-                        class="w-8 h-8 flex items-center justify-center text-neutral-600"
-                      >
-                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                          <circle cx="5" cy="12" r="1.5" />
-                          <circle cx="12" cy="12" r="1.5" />
-                          <circle cx="19" cy="12" r="1.5" />
-                        </svg>
-                      </button>
-                    </div>
-                  )}
-                </For>
+          return (
+            <div
+              class="fixed z-50 bg-neutral-800 rounded-lg shadow-lg py-1 min-w-[160px] border border-neutral-700"
+              style={{
+                left: `${menu().x}px`,
+                top: `${menu().y}px`,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Create options - show when right-clicking on collection or empty area */}
+              <Show when={isCollection || !entry}>
+                <button
+                  onClick={() => handleCreateInFolder("mix", entry?.path || currentPath())}
+                  class="w-full px-3 py-2 text-left text-sm text-neutral-200 hover:bg-neutral-700 flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"
+                    />
+                  </svg>
+                  New Mix Here
+                </button>
+                <button
+                  onClick={() => handleCreateInFolder("collection", entry?.path || currentPath())}
+                  class="w-full px-3 py-2 text-left text-sm text-neutral-200 hover:bg-neutral-700 flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                    />
+                  </svg>
+                  New Collection Here
+                </button>
+                <Show when={hasSelection}>
+                  <div class="border-t border-neutral-700 my-1" />
+                </Show>
+              </Show>
+
+              {/* Delete option - show when items are selected */}
+              <Show when={hasSelection}>
+                <button
+                  onClick={handleContextDelete}
+                  class="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-neutral-700 flex items-center gap-2"
+                >
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                    />
+                  </svg>
+                  Delete{selectedPaths().size > 1 ? ` (${selectedPaths().size})` : ""}
+                </button>
               </Show>
             </div>
-          </div>
-        </div>
+          );
+        }}
       </Show>
+
+      {/* ===== MODALS (shared by both layouts) ===== */}
 
       {/* Create Modal - Type Selection - Clean iOS style */}
       <Show when={isCreating() === "select"}>
@@ -730,30 +1176,6 @@ const App: Component = () => {
                 <div>
                   <div class="font-semibold text-neutral-200">Mix</div>
                   <div class="text-sm text-neutral-500">Start a new recording</div>
-                </div>
-              </button>
-              <button
-                onClick={() => setIsCreating("project")}
-                class="w-full p-4 rounded-xl bg-neutral-800 text-left flex items-center gap-4"
-              >
-                <div class="w-12 h-12 rounded-xl bg-neutral-700 flex items-center justify-center">
-                  <svg
-                    class="w-6 h-6 text-neutral-300"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="1.5"
-                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <div class="font-semibold text-neutral-200">Project</div>
-                  <div class="text-sm text-neutral-500">Group related mixes together</div>
                 </div>
               </button>
               <button
@@ -793,48 +1215,40 @@ const App: Component = () => {
 
       {/* Create Modal - Name Input */}
       <Show when={isCreating() && isCreating() !== "select"}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-5">
-            <h2 class="text-lg font-semibold mb-3 text-neutral-200">
-              New{" "}
-              {isCreating() === "collection"
-                ? "Collection"
-                : isCreating() === "project"
-                  ? "Project"
-                  : "Mix"}
-            </h2>
-            <input
-              type="text"
-              value={newName()}
-              onInput={(e) => setNewName(e.currentTarget.value)}
-              onKeyPress={(e) => e.key === "Enter" && handleCreate()}
-              placeholder={
-                isCreating() === "collection"
-                  ? "Collection name..."
-                  : isCreating() === "project"
-                    ? "Project name..."
-                    : "Mix name..."
-              }
-              class="w-full px-4 py-3 bg-neutral-800 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-600"
-              autofocus
-            />
-            <div class="flex gap-3 mt-4">
-              <button
-                onClick={() => {
-                  setIsCreating(null);
-                  setNewName("");
-                }}
-                class="flex-1 py-2.5 rounded-xl bg-neutral-800 text-neutral-300 text-sm"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleCreate}
-                disabled={!newName().trim()}
-                class="flex-1 py-2.5 rounded-xl bg-white text-black text-sm font-semibold disabled:opacity-50"
-              >
-                Create
-              </button>
+        <div class="fixed inset-0 bg-black/80 z-50 p-4 overflow-y-auto">
+          <div class="min-h-full flex items-center justify-center">
+            <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-5 my-auto">
+              <h2 class="text-lg font-semibold mb-3 text-neutral-200">
+                New {isCreating() === "collection" ? "Collection" : "Mix"}
+              </h2>
+              <input
+                type="text"
+                value={newName()}
+                onInput={(e) => setNewName(e.currentTarget.value)}
+                onKeyPress={(e) => e.key === "Enter" && handleCreate()}
+                placeholder={isCreating() === "collection" ? "Collection name..." : "Mix name..."}
+                class="relative w-full px-4 py-3 bg-neutral-800 rounded-lg text-white placeholder-neutral-500 border border-neutral-700"
+                style={{ "z-index": 1 }}
+                autofocus
+              />
+              <div class="flex gap-3 mt-4">
+                <button
+                  onClick={() => {
+                    setIsCreating(null);
+                    setNewName("");
+                  }}
+                  class="flex-1 py-2.5 rounded-xl bg-neutral-800 text-neutral-300 text-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreate}
+                  disabled={!newName().trim()}
+                  class="flex-1 py-2.5 rounded-xl bg-white text-black text-sm font-semibold disabled:opacity-50"
+                >
+                  Create
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -955,6 +1369,128 @@ const App: Component = () => {
                 {isDeleting() ? "Deleting..." : "Delete"}
               </button>
             </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Multi-Delete Confirmation (desktop) */}
+      <Show when={confirmDeleteSelected()}>
+        <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-5">
+            <h2 class="text-lg font-semibold mb-2 text-neutral-200">
+              Delete {selectedPaths().size} item{selectedPaths().size !== 1 ? "s" : ""}?
+            </h2>
+            <p class="text-sm text-neutral-500 mb-4">
+              This will move the selected items to your Trash. You can restore them from there if
+              needed.
+            </p>
+            <div class="flex gap-3">
+              <button
+                onClick={() => setConfirmDeleteSelected(false)}
+                disabled={isDeleting()}
+                class="flex-1 py-2.5 rounded-xl bg-neutral-800 text-neutral-300 text-sm disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteSelected}
+                disabled={isDeleting()}
+                class="flex-1 py-2.5 rounded-xl bg-destructive text-white text-sm font-semibold disabled:opacity-50"
+              >
+                {isDeleting() ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Vault Picker Modal */}
+      <Show when={showVaultPicker()}>
+        <div class="fixed inset-0 bg-black/80 z-50 flex items-end justify-center">
+          <div class="bg-neutral-900 rounded-t-2xl w-full max-w-md p-5 pb-8">
+            <div class="w-12 h-1 bg-neutral-700 rounded-full mx-auto mb-4" />
+            <h2 class="text-lg font-semibold mb-4 text-center">Select Vault</h2>
+            <div class="space-y-2 max-h-64 overflow-y-auto">
+              <For each={vaultStore.vaults()}>
+                {(vault) => (
+                  <button
+                    onClick={() => handleVaultSwitch(vault.id)}
+                    class={`w-full p-4 rounded-xl text-left flex items-center gap-4 ${
+                      vault.id === vaultStore.activeVault()?.id
+                        ? "bg-neutral-700"
+                        : "bg-neutral-800"
+                    }`}
+                  >
+                    <div class="w-10 h-10 rounded-lg bg-neutral-600 flex items-center justify-center">
+                      <Show when={vault.provider === "local"}>
+                        <svg
+                          class="w-5 h-5 text-neutral-300"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
+                          />
+                        </svg>
+                      </Show>
+                      <Show when={vault.provider === "icloud"}>
+                        <svg
+                          class="w-5 h-5 text-neutral-300"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            stroke-linecap="round"
+                            stroke-linejoin="round"
+                            stroke-width="2"
+                            d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
+                          />
+                        </svg>
+                      </Show>
+                      <Show when={vault.provider === "dropbox"}>
+                        <svg
+                          class="w-5 h-5 text-neutral-300"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M12 6.134L6 10.5l6 4.366L6 19.232l-6-4.366L6 10.5 0 6.134l6-4.366 6 4.366zm0 0l6-4.366 6 4.366-6 4.366 6 4.366-6 4.366-6-4.366 6-4.366-6-4.366z" />
+                        </svg>
+                      </Show>
+                    </div>
+                    <div class="flex-1">
+                      <div class="font-medium text-neutral-200">{vault.name}</div>
+                      <div class="text-xs text-neutral-500 capitalize">{vault.provider}</div>
+                    </div>
+                    <Show when={vault.id === vaultStore.activeVault()?.id}>
+                      <svg
+                        class="w-5 h-5 text-green-500"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M5 13l4 4L19 7"
+                        />
+                      </svg>
+                    </Show>
+                  </button>
+                )}
+              </For>
+            </div>
+            <button
+              onClick={() => setShowVaultPicker(false)}
+              class="w-full mt-4 py-3 rounded-xl bg-neutral-800 text-neutral-300"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       </Show>

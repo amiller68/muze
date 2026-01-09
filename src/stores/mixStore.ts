@@ -233,6 +233,15 @@ export function useMixStore() {
     setArmedTrack(trackIndex);
   };
 
+  const clearMix = async () => {
+    // Stop any current playback
+    await invoke("pause").catch(() => {});
+    setCurrentMix(null);
+    setMixPath(null);
+    setIsDirty(false);
+    setSelectedTrack(0);
+  };
+
   return {
     // State
     currentMix,
@@ -258,6 +267,7 @@ export function useMixStore() {
     updateClipDuration,
     setCurrentMix,
     reloadTracks,
+    clearMix,
   };
 }
 

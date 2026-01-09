@@ -19,6 +19,7 @@ make dev      # Start dev server
 | [CONTRIBUTING.md](./CONTRIBUTING.md) | Code standards, patterns, PR process |
 | [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) | Definition of "done" |
 | [IOS_DEPLOYMENT.md](./IOS_DEPLOYMENT.md) | Building and deploying via AltStore |
+| [ISSUES.md](./ISSUES.md) | Issue tracking, epics, and ticket workflow |
 
 ## Key Constraints
 

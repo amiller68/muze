@@ -1,5 +1,5 @@
 use crate::audio::{delete_audio_region, export_mix, splice_audio, AudioEngine, TrackInfo};
-use crate::project::{self, Collection, FolderEntry, Mix, Project};
+use crate::project::{self, Collection, FolderEntry, Mix};
 use std::sync::Arc;
 use tauri::State;
 
@@ -126,13 +126,6 @@ pub fn list_projects(root_path: String) -> Result<Vec<FolderEntry>, String> {
     project::list_entries(&root_path)
 }
 
-// ============= Project Folder Commands =============
-
-#[tauri::command]
-pub fn create_project_folder(name: String, parent_path: String) -> Result<Project, String> {
-    project::create_project(&name, &parent_path)
-}
-
 // ============= Mix Commands =============
 
 #[tauri::command]
@@ -177,6 +170,51 @@ pub fn delete_entry(entry_path: String) -> Result<(), String> {
             std::fs::remove_file(path).map_err(|e| e.to_string())
         }
     }
+}
+
+// ============= Move Commands =============
+
+#[tauri::command]
+pub fn move_entry(source_path: String, dest_folder: String) -> Result<String, String> {
+    let source = std::path::Path::new(&source_path);
+    let dest_dir = std::path::Path::new(&dest_folder);
+
+    // Validate source exists
+    if !source.exists() {
+        return Err(format!("Source does not exist: {}", source_path));
+    }
+
+    // Validate destination is a directory
+    if !dest_dir.is_dir() {
+        return Err(format!("Destination is not a directory: {}", dest_folder));
+    }
+
+    // Get the name of the item being moved
+    let name = source
+        .file_name()
+        .ok_or("Invalid source path")?
+        .to_string_lossy();
+
+    // Build destination path
+    let dest_path = dest_dir.join(&*name);
+
+    // Check if source == dest (moving to same location)
+    if source == dest_path {
+        return Ok(dest_path.to_string_lossy().to_string());
+    }
+
+    // Check for name conflict
+    if dest_path.exists() {
+        return Err(format!(
+            "An item named '{}' already exists in the destination",
+            name
+        ));
+    }
+
+    // Perform the move
+    std::fs::rename(source, &dest_path).map_err(|e| format!("Failed to move: {}", e))?;
+
+    Ok(dest_path.to_string_lossy().to_string())
 }
 
 // ============= File System Commands =============
