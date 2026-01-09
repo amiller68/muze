@@ -1,6 +1,7 @@
 mod audio;
 mod commands;
 mod project;
+mod vault;
 
 use audio::{configure_audio_session, AudioEngine};
 use std::sync::Arc;
@@ -46,8 +47,6 @@ pub fn run() {
             commands::load_project,
             commands::save_project,
             commands::list_projects,
-            // Project folder
-            commands::create_project_folder,
             // Mix
             commands::create_mix,
             commands::load_mix,
@@ -56,12 +55,20 @@ pub fn run() {
             // File system
             commands::get_default_projects_path,
             commands::delete_entry,
+            commands::move_entry,
             // Audio
             commands::load_tracks,
             commands::splice_recording,
             commands::trim_audio,
             commands::export_mix_to_file,
             commands::export_and_share,
+            // Vault
+            vault::load_vault_registry,
+            vault::save_vault_registry,
+            vault::create_vault,
+            vault::delete_vault,
+            vault::set_active_vault,
+            vault::get_active_vault_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

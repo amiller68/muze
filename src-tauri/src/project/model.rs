@@ -30,34 +30,6 @@ impl Collection {
     }
 }
 
-// ============= Project =============
-// A project contains mixes
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Project {
-    pub id: Uuid,
-    pub name: String,
-    pub created_at: DateTime<Utc>,
-    pub modified_at: DateTime<Utc>,
-}
-
-impl Project {
-    pub fn new(name: &str) -> Self {
-        let now = Utc::now();
-        Self {
-            id: Uuid::new_v4(),
-            name: name.to_string(),
-            created_at: now,
-            modified_at: now,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn touch(&mut self) {
-        self.modified_at = Utc::now();
-    }
-}
-
 // ============= Mix =============
 // A mix contains tracks (this was previously called Project)
 
@@ -186,7 +158,6 @@ pub struct FolderEntry {
 #[serde(rename_all = "snake_case")]
 pub enum EntryType {
     Collection,
-    Project,
     Mix,
     Unknown,
 }
@@ -210,13 +181,6 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(10));
         c.touch();
         assert!(c.modified_at > original);
-    }
-
-    #[test]
-    fn project_new_creates_valid_project() {
-        let p = Project::new("Test Project");
-        assert_eq!(p.name, "Test Project");
-        assert!(p.created_at <= Utc::now());
     }
 
     #[test]
