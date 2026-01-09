@@ -54,3 +54,12 @@ body {
   user-select: none;
   -webkit-user-select: none;
 }
+
+/* Safe area support for iOS */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.mb-safe {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}

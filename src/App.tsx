@@ -503,18 +503,24 @@ const App: Component = () => {
             </Show>
           </div>
 
-          {/* Floating Add Button */}
-          <div class="absolute bottom-6 left-1/2 -translate-x-1/2">
-            <button
-              onClick={() => setIsCreating("select")}
-              class="px-6 py-3 rounded-full bg-gray-800 text-white font-medium flex items-center gap-2 shadow-lg"
-            >
-              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-              </svg>
-              Add
-            </button>
-          </div>
+        </div>
+      </Show>
+
+      {/* Floating Add Button - fixed position for iOS visibility */}
+      <Show when={view() === "browser"}>
+        <div
+          class="fixed left-1/2 -translate-x-1/2 z-50"
+          style={{ bottom: "calc(24px + env(safe-area-inset-bottom, 0px))" }}
+        >
+          <button
+            onClick={() => setIsCreating("select")}
+            class="px-6 py-3 rounded-full bg-blue-600 text-white font-medium flex items-center gap-2 shadow-lg"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+            </svg>
+            Add
+          </button>
         </div>
       </Show>
 
