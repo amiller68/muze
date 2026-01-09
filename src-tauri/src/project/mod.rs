@@ -1,6 +1,6 @@
 mod model;
 
-pub use model::{Clip, Collection, CutRegion, EntryType, FolderEntry, Mix, Project, Track};
+pub use model::{Collection, EntryType, FolderEntry, Mix, Project};
 
 use std::path::Path;
 
@@ -14,7 +14,8 @@ pub fn create_collection(name: &str, parent_path: &str) -> Result<Collection, St
     std::fs::create_dir_all(&collection_path).map_err(|e| e.to_string())?;
 
     let json = serde_json::to_string_pretty(&collection).map_err(|e| e.to_string())?;
-    std::fs::write(format!("{}/collection.json", collection_path), json).map_err(|e| e.to_string())?;
+    std::fs::write(format!("{}/collection.json", collection_path), json)
+        .map_err(|e| e.to_string())?;
 
     Ok(collection)
 }
@@ -25,10 +26,12 @@ pub fn load_collection(collection_path: &str) -> Result<Collection, String> {
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
+#[allow(dead_code)]
 pub fn save_collection(collection: &Collection, collection_path: &str) -> Result<(), String> {
     std::fs::create_dir_all(collection_path).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(collection).map_err(|e| e.to_string())?;
-    std::fs::write(format!("{}/collection.json", collection_path), json).map_err(|e| e.to_string())?;
+    std::fs::write(format!("{}/collection.json", collection_path), json)
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -47,12 +50,14 @@ pub fn create_project(name: &str, parent_path: &str) -> Result<Project, String> 
     Ok(project)
 }
 
+#[allow(dead_code)]
 pub fn load_project(project_path: &str) -> Result<Project, String> {
     let json = std::fs::read_to_string(format!("{}/project.json", project_path))
         .map_err(|e| e.to_string())?;
     serde_json::from_str(&json).map_err(|e| e.to_string())
 }
 
+#[allow(dead_code)]
 pub fn save_project(project: &Project, project_path: &str) -> Result<(), String> {
     std::fs::create_dir_all(project_path).map_err(|e| e.to_string())?;
     let json = serde_json::to_string_pretty(project).map_err(|e| e.to_string())?;
@@ -114,7 +119,8 @@ pub fn list_entries(path: &str) -> Result<Vec<FolderEntry>, String> {
         let path = entry.path();
         if path.is_dir() {
             // Skip hidden directories
-            if path.file_name()
+            if path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .map(|s| s.starts_with('.'))
                 .unwrap_or(false)
@@ -139,13 +145,11 @@ pub fn list_entries(path: &str) -> Result<Vec<FolderEntry>, String> {
     }
 
     // Sort by modified time, most recent first
-    entries.sort_by(|a, b| {
-        match (&b.modified_at, &a.modified_at) {
-            (Some(b_time), Some(a_time)) => b_time.cmp(a_time),
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (None, None) => a.name.cmp(&b.name),
-        }
+    entries.sort_by(|a, b| match (&b.modified_at, &a.modified_at) {
+        (Some(b_time), Some(a_time)) => b_time.cmp(a_time),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => a.name.cmp(&b.name),
     });
 
     Ok(entries)
@@ -176,7 +180,11 @@ fn get_modified_time(path: &Path, entry_type: &EntryType) -> Option<chrono::Date
         EntryType::Project => path.join("project.json"),
         EntryType::Mix => {
             let mix_file = path.join("mix.json");
-            if mix_file.exists() { mix_file } else { path.join("project.json") }
+            if mix_file.exists() {
+                mix_file
+            } else {
+                path.join("project.json")
+            }
         }
         EntryType::Unknown => return None,
     };
@@ -193,16 +201,23 @@ fn get_modified_time(path: &Path, entry_type: &EntryType) -> Option<chrono::Date
     }
 
     // Fall back to file system modified time
-    json_file.metadata()
+    json_file
+        .metadata()
         .and_then(|m| m.modified())
         .ok()
-        .map(|t| chrono::DateTime::from(t))
+        .map(chrono::DateTime::from)
 }
 
 // ============= Helpers =============
 
 fn sanitize_name(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

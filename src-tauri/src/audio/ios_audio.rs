@@ -13,10 +13,9 @@ pub fn configure_audio_session() -> Result<(), String> {
         let session = AVAudioSession::sharedInstance();
 
         // Get category and mode - these are Option<&NSString>
-        let category = AVAudioSessionCategoryPlayAndRecord
-            .ok_or("PlayAndRecord category not available")?;
-        let mode = AVAudioSessionModeDefault
-            .ok_or("Default mode not available")?;
+        let category =
+            AVAudioSessionCategoryPlayAndRecord.ok_or("PlayAndRecord category not available")?;
+        let mode = AVAudioSessionModeDefault.ok_or("Default mode not available")?;
 
         // Configure options for speaker output and bluetooth
         #[allow(deprecated)]
@@ -50,7 +49,7 @@ pub fn share_file(file_path: &str) -> Result<(), String> {
     use dispatch2::Queue;
     use objc2::rc::Retained;
     use objc2::runtime::AnyObject;
-    use objc2::{msg_send_id, MainThreadMarker, ClassType};
+    use objc2::{msg_send_id, ClassType, MainThreadMarker};
     use objc2_foundation::{NSArray, NSString, NSURL};
     use objc2_ui_kit::{UIActivityViewController, UIApplication};
 
@@ -73,7 +72,7 @@ pub fn share_file(file_path: &str) -> Result<(), String> {
             let activity_vc = UIActivityViewController::initWithActivityItems_applicationActivities(
                 mtm.alloc(),
                 &items,
-                None
+                None,
             );
 
             let app = UIApplication::sharedApplication(mtm);

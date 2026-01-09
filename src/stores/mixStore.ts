@@ -1,8 +1,8 @@
-import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import type { Mix, Track, Clip } from "../types/project";
-import { TRACK_COLORS } from "../constants/theme";
+import { createSignal } from "solid-js";
 import { AUTO_SAVE_DEBOUNCE_MS } from "../constants/config";
+import { TRACK_COLORS } from "../constants/theme";
+import type { Clip, Mix, Track } from "../types/project";
 
 const [currentMix, setCurrentMix] = createSignal<Mix | null>(null);
 const [mixPath, setMixPath] = createSignal<string | null>(null);
@@ -21,7 +21,7 @@ const autoSave = () => {
       try {
         await invoke("save_project", { project: mix, projectPath: path });
         setIsDirty(false);
-      } catch (e) {
+      } catch (_e) {
         // Auto-save failed silently
       }
     }
@@ -119,11 +119,7 @@ export function useMixStore() {
     autoSave();
   };
 
-  const addClipToTrack = async (
-    trackIndex: number,
-    audioFile: string,
-    durationMs: number
-  ) => {
+  const addClipToTrack = async (trackIndex: number, audioFile: string, durationMs: number) => {
     const mix = currentMix();
     const path = mixPath();
     if (!mix || !path) return;
@@ -138,9 +134,7 @@ export function useMixStore() {
       cuts: [],
     };
 
-    const newTracks = mix.tracks.map((t, i) =>
-      i === trackIndex ? { ...t, clip } : t
-    );
+    const newTracks = mix.tracks.map((t, i) => (i === trackIndex ? { ...t, clip } : t));
 
     const newMix = { ...mix, tracks: newTracks };
     setCurrentMix(newMix);
@@ -159,7 +153,7 @@ export function useMixStore() {
     if (!mix || !path) return;
 
     const newTracks = mix.tracks.map((t, i) =>
-      i === trackIndex ? { ...t, volume: Math.max(0, Math.min(1, volume)) } : t
+      i === trackIndex ? { ...t, volume: Math.max(0, Math.min(1, volume)) } : t,
     );
 
     const newMix = { ...mix, tracks: newTracks };
@@ -176,9 +170,7 @@ export function useMixStore() {
     const path = mixPath();
     if (!mix || !path) return;
 
-    const newTracks = mix.tracks.map((t, i) =>
-      i === trackIndex ? { ...t, muted } : t
-    );
+    const newTracks = mix.tracks.map((t, i) => (i === trackIndex ? { ...t, muted } : t));
 
     const newMix = { ...mix, tracks: newTracks };
     setCurrentMix(newMix);
@@ -195,9 +187,7 @@ export function useMixStore() {
     if (!mix || !path) return;
 
     // When soloing, mute all other non-soloed tracks
-    const newTracks = mix.tracks.map((t, i) =>
-      i === trackIndex ? { ...t, solo } : t
-    );
+    const newTracks = mix.tracks.map((t, i) => (i === trackIndex ? { ...t, solo } : t));
 
     const newMix = { ...mix, tracks: newTracks };
     setCurrentMix(newMix);
@@ -273,4 +263,3 @@ export function useMixStore() {
 
 // Export alias for backward compatibility
 export const useProjectStore = useMixStore;
- 

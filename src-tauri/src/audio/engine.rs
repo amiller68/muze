@@ -8,7 +8,8 @@ use thiserror::Error;
 /// A loaded audio track ready for playback
 #[derive(Clone)]
 pub struct LoadedTrack {
-    pub samples: Vec<f32>,  // Mono audio samples
+    pub samples: Vec<f32>, // Mono audio samples
+    #[allow(dead_code)]
     pub sample_rate: u32,
     pub volume: f32,
     pub muted: bool,
@@ -29,6 +30,7 @@ pub enum AudioError {
     ConfigError(String),
     #[error("Failed to build stream: {0}")]
     StreamError(String),
+    #[allow(dead_code)]
     #[error("Audio thread failed to start")]
     ThreadError,
 }
@@ -49,13 +51,17 @@ pub enum AudioCommand {
     Stop,
     Seek(u64),
     LoadTracks(Vec<TrackInfo>),
-    StartRecording { track_index: usize, output_path: String },
+    StartRecording {
+        track_index: usize,
+        output_path: String,
+    },
     StopRecording,
     Shutdown,
 }
 
 /// Events sent back from the audio thread
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum AudioEvent {
     RecordingStarted { track_index: usize },
     RecordingStopped { result: RecordingResult },
@@ -102,6 +108,7 @@ impl SharedState {
 pub struct AudioEngine {
     shared_state: Arc<SharedState>,
     command_tx: Sender<AudioCommand>,
+    #[allow(dead_code)]
     event_rx: Receiver<AudioEvent>,
     is_dummy: bool,
 }
@@ -226,6 +233,7 @@ impl AudioEngine {
             .map_err(|e| e.to_string())
     }
 
+    #[allow(dead_code)]
     pub fn poll_event(&self) -> Option<AudioEvent> {
         self.event_rx.try_recv().ok()
     }
@@ -242,15 +250,15 @@ fn load_wav_file(path: &str, target_sample_rate: u32) -> Result<Vec<f32>, String
 
     // Read all samples
     let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => {
-            reader.into_samples::<f32>()
-                .filter_map(|s| s.ok())
-                .collect()
-        }
+        hound::SampleFormat::Float => reader
+            .into_samples::<f32>()
+            .filter_map(|s| s.ok())
+            .collect(),
         hound::SampleFormat::Int => {
             let bits = spec.bits_per_sample;
             let max_val = (1 << (bits - 1)) as f32;
-            reader.into_samples::<i32>()
+            reader
+                .into_samples::<i32>()
                 .filter_map(|s| s.ok())
                 .map(|s| s as f32 / max_val)
                 .collect()
@@ -259,7 +267,8 @@ fn load_wav_file(path: &str, target_sample_rate: u32) -> Result<Vec<f32>, String
 
     // Convert to mono if stereo
     let mono: Vec<f32> = if channels == 2 {
-        samples.chunks(2)
+        samples
+            .chunks(2)
             .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
             .collect()
     } else {
@@ -303,7 +312,9 @@ fn run_audio_thread(
     let sample_rate = output_config.sample_rate().0;
     let output_channels = output_config.channels() as usize;
 
-    shared_state.sample_rate.store(sample_rate as u64, Ordering::SeqCst);
+    shared_state
+        .sample_rate
+        .store(sample_rate as u64, Ordering::SeqCst);
 
     // Setup input device
     let input_device = host
@@ -401,7 +412,9 @@ fn run_audio_thread(
                         }
                     }
 
-                    output_shared_state.playhead_samples.fetch_add(num_frames as u64, Ordering::SeqCst);
+                    output_shared_state
+                        .playhead_samples
+                        .fetch_add(num_frames as u64, Ordering::SeqCst);
                 } else {
                     data.fill(0.0);
                 }
@@ -414,8 +427,12 @@ fn run_audio_thread(
         .map_err(|e| AudioError::StreamError(e.to_string()))?;
 
     // Start streams
-    input_stream.play().map_err(|e| AudioError::StreamError(e.to_string()))?;
-    output_stream.play().map_err(|e| AudioError::StreamError(e.to_string()))?;
+    input_stream
+        .play()
+        .map_err(|e| AudioError::StreamError(e.to_string()))?;
+    output_stream
+        .play()
+        .map_err(|e| AudioError::StreamError(e.to_string()))?;
 
     // Command processing loop
     loop {
@@ -441,7 +458,9 @@ fn run_audio_thread(
                 }
             }
             Ok(AudioCommand::Seek(position)) => {
-                shared_state.playhead_samples.store(position, Ordering::SeqCst);
+                shared_state
+                    .playhead_samples
+                    .store(position, Ordering::SeqCst);
             }
             Ok(AudioCommand::LoadTracks(track_infos)) => {
                 let mut loaded_tracks = Vec::new();
@@ -464,12 +483,17 @@ fn run_audio_thread(
                     data.tracks = loaded_tracks;
                 }
             }
-            Ok(AudioCommand::StartRecording { track_index, output_path }) => {
+            Ok(AudioCommand::StartRecording {
+                track_index,
+                output_path,
+            }) => {
                 if let Ok(mut rec) = recorder.lock() {
                     match rec.start(&output_path) {
                         Ok(()) => {
                             shared_state.is_recording.store(true, Ordering::SeqCst);
-                            shared_state.recording_track.store(track_index as u64, Ordering::SeqCst);
+                            shared_state
+                                .recording_track
+                                .store(track_index as u64, Ordering::SeqCst);
                             let _ = event_tx.try_send(AudioEvent::RecordingStarted { track_index });
                         }
                         Err(e) => {
@@ -482,7 +506,9 @@ fn run_audio_thread(
             }
             Ok(AudioCommand::StopRecording) => {
                 shared_state.is_recording.store(false, Ordering::SeqCst);
-                shared_state.recording_track.store(u64::MAX, Ordering::SeqCst);
+                shared_state
+                    .recording_track
+                    .store(u64::MAX, Ordering::SeqCst);
 
                 if let Ok(mut rec) = recorder.lock() {
                     match rec.stop() {

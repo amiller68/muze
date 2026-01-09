@@ -1,7 +1,8 @@
-import { Component, createSignal, Show, For, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
+import { type Component, createSignal, For, onMount, Show } from "solid-js";
 import { MixEditor } from "./components/editor/MixEditor";
 import { useMixStore } from "./stores/mixStore";
+import type { Mix, Track } from "./types/mix";
 
 interface FolderEntry {
   name: string;
@@ -24,7 +25,9 @@ const App: Component = () => {
   const [currentPath, setCurrentPath] = createSignal<string>("");
   const [pathStack, setPathStack] = createSignal<string[]>([]);
   const [entries, setEntries] = createSignal<EntryWithChildren[]>([]);
-  const [isCreating, setIsCreating] = createSignal<"mix" | "collection" | "project" | "select" | null>(null);
+  const [isCreating, setIsCreating] = createSignal<
+    "mix" | "collection" | "project" | "select" | null
+  >(null);
   const [newName, setNewName] = createSignal("");
   const [currentProject, setCurrentProject] = createSignal<FolderEntry | null>(null);
   const [menuEntry, setMenuEntry] = createSignal<FolderEntry | null>(null);
@@ -60,7 +63,7 @@ const App: Component = () => {
             }
           }
           return entry;
-        })
+        }),
       );
 
       setEntries(entriesWithChildren);
@@ -94,7 +97,7 @@ const App: Component = () => {
     if (entry.entry_type === "mix") {
       // Open mix in editor - set view immediately, load in background
       setView("editor");
-      store.loadMix(entry.path).catch(e => {
+      store.loadMix(entry.path).catch((e) => {
         console.error("Failed to load mix:", e);
         // Go back to previous view on error
         const project = currentProject();
@@ -111,8 +114,8 @@ const App: Component = () => {
       setView("project"); // Set view first
       // Load entries in background
       invoke<FolderEntry[]>("list_entries", { path: entry.path })
-        .then(items => setEntries(items))
-        .catch(e => console.error("Failed to load project entries:", e));
+        .then((items) => setEntries(items))
+        .catch((e) => console.error("Failed to load project entries:", e));
     } else if (entry.entry_type === "collection") {
       // Navigate into collection
       await navigateTo(entry.path);
@@ -201,10 +204,14 @@ const App: Component = () => {
 
   const getTypeLabel = (type: string) => {
     switch (type) {
-      case "collection": return "Collection";
-      case "project": return "Project";
-      case "mix": return "Mix";
-      default: return "";
+      case "collection":
+        return "Collection";
+      case "project":
+        return "Project";
+      case "mix":
+        return "Mix";
+      default:
+        return "";
     }
   };
 
@@ -212,11 +219,11 @@ const App: Component = () => {
   const filteredEntries = () => {
     const query = searchQuery().toLowerCase().trim();
     if (!query) return entries();
-    return entries().filter(e => e.name.toLowerCase().includes(query));
+    return entries().filter((e) => e.name.toLowerCase().includes(query));
   };
 
   // Get mixes from current entries (for project view)
-  const mixEntries = () => entries().filter(e => e.entry_type === "mix");
+  const mixEntries = () => entries().filter((e) => e.entry_type === "mix");
 
   return (
     <div class="h-screen bg-black text-white">
@@ -238,7 +245,7 @@ const App: Component = () => {
           class="h-full flex flex-col bg-black relative"
           style={{
             "padding-top": "env(safe-area-inset-top, 0px)",
-            "padding-bottom": "env(safe-area-inset-bottom, 0px)"
+            "padding-bottom": "env(safe-area-inset-bottom, 0px)",
           }}
         >
           {/* Header */}
@@ -250,8 +257,18 @@ const App: Component = () => {
                     onClick={navigateBack}
                     class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center shrink-0"
                   >
-                    <svg class="w-5 h-5 text-neutral-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+                    <svg
+                      class="w-5 h-5 text-neutral-300"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M15 19l-7-7 7-7"
+                      />
                     </svg>
                   </button>
                 </Show>
@@ -269,8 +286,18 @@ const App: Component = () => {
                     class="w-full pl-10 pr-4 py-2.5 bg-neutral-800 rounded-full text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-600"
                     autofocus
                   />
-                  <svg class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  <svg
+                    class="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                    />
                   </svg>
                 </div>
               </div>
@@ -283,13 +310,33 @@ const App: Component = () => {
               class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center shrink-0"
             >
               <Show when={!showSearch()}>
-                <svg class="w-5 h-5 text-neutral-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                <svg
+                  class="w-5 h-5 text-neutral-300"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
                 </svg>
               </Show>
               <Show when={showSearch()}>
-                <svg class="w-5 h-5 text-neutral-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                <svg
+                  class="w-5 h-5 text-neutral-300"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M6 18L18 6M6 6l12 12"
+                  />
                 </svg>
               </Show>
             </button>
@@ -301,8 +348,18 @@ const App: Component = () => {
               when={entries().length > 0}
               fallback={
                 <div class="flex flex-col items-center justify-center h-full text-neutral-500">
-                  <svg class="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  <svg
+                    class="w-16 h-16 mb-4 opacity-30"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1"
+                      d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                    />
                   </svg>
                   <p class="text-lg mb-1">No items yet</p>
                   <p class="text-sm text-neutral-600">Tap + Add to get started</p>
@@ -311,10 +368,12 @@ const App: Component = () => {
             >
               <div class="divide-y divide-neutral-800">
                 {/* Sort: collections first, then projects, then mixes */}
-                <For each={[...filteredEntries()].sort((a, b) => {
-                  const order = { collection: 0, project: 1, mix: 2, unknown: 3 };
-                  return (order[a.entry_type] || 3) - (order[b.entry_type] || 3);
-                })}>
+                <For
+                  each={[...filteredEntries()].sort((a, b) => {
+                    const order = { collection: 0, project: 1, mix: 2, unknown: 3 };
+                    return (order[a.entry_type] || 3) - (order[b.entry_type] || 3);
+                  })}
+                >
                   {(entry) => {
                     const isFolder = entry.entry_type === "collection";
                     const isMix = entry.entry_type === "mix";
@@ -326,22 +385,58 @@ const App: Component = () => {
                         onClick={() => handleEntryClick(entry)}
                       >
                         {/* Icon */}
-                        <div class={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                          isMix ? "bg-neutral-800" : isProject ? "bg-neutral-800" : "bg-neutral-800"
-                        }`}>
+                        <div
+                          class={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
+                            isMix
+                              ? "bg-neutral-800"
+                              : isProject
+                                ? "bg-neutral-800"
+                                : "bg-neutral-800"
+                          }`}
+                        >
                           <Show when={isMix}>
-                            <svg class="w-6 h-6 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                            <svg
+                              class="w-6 h-6 text-neutral-400"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="1.5"
+                                d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                              />
                             </svg>
                           </Show>
                           <Show when={isProject}>
-                            <svg class="w-6 h-6 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            <svg
+                              class="w-6 h-6 text-neutral-400"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="1.5"
+                                d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                              />
                             </svg>
                           </Show>
                           <Show when={isFolder}>
-                            <svg class="w-6 h-6 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            <svg
+                              class="w-6 h-6 text-neutral-400"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                stroke-width="1.5"
+                                d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                              />
                             </svg>
                           </Show>
                         </div>
@@ -350,24 +445,33 @@ const App: Component = () => {
                         <div class="flex-1 min-w-0">
                           <div class="font-medium text-neutral-200 truncate">{entry.name}</div>
                           <div class="text-sm text-neutral-500">
-                            <Show when={isFolder}>
-                              {entry.children?.length || 0} items
-                            </Show>
-                            <Show when={isProject}>
-                              Project
-                            </Show>
+                            <Show when={isFolder}>{entry.children?.length || 0} items</Show>
+                            <Show when={isProject}>Project</Show>
                             <Show when={isMix}>
                               {entry.modified_at
-                                ? new Date(entry.modified_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                                : 'Mix'}
+                                ? new Date(entry.modified_at).toLocaleDateString("en-US", {
+                                    month: "short",
+                                    day: "numeric",
+                                  })
+                                : "Mix"}
                             </Show>
                           </div>
                         </div>
 
                         {/* Chevron for folders/projects, play for mixes */}
                         <Show when={!isMix}>
-                          <svg class="w-5 h-5 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                          <svg
+                            class="w-5 h-5 text-neutral-600"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M9 5l7 7-7 7"
+                            />
                           </svg>
                         </Show>
                         <Show when={isMix}>
@@ -378,7 +482,11 @@ const App: Component = () => {
                             }}
                             class="w-10 h-10 rounded-full bg-neutral-700 flex items-center justify-center"
                           >
-                            <svg class="w-4 h-4 ml-0.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                            <svg
+                              class="w-4 h-4 ml-0.5 text-white"
+                              fill="currentColor"
+                              viewBox="0 0 24 24"
+                            >
                               <path d="M8 5.14v14l11-7-11-7z" />
                             </svg>
                           </button>
@@ -405,7 +513,6 @@ const App: Component = () => {
               </div>
             </Show>
           </div>
-
         </div>
       </Show>
 
@@ -420,7 +527,12 @@ const App: Component = () => {
             class="px-6 py-3 rounded-full bg-neutral-800 text-white font-medium flex items-center gap-2 shadow-elevated"
           >
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
             </svg>
             Add
           </button>
@@ -433,7 +545,7 @@ const App: Component = () => {
           class="h-full flex flex-col bg-black"
           style={{
             "padding-top": "env(safe-area-inset-top, 0px)",
-            "padding-bottom": "env(safe-area-inset-bottom, 0px)"
+            "padding-bottom": "env(safe-area-inset-bottom, 0px)",
           }}
         >
           {/* Header with back button */}
@@ -442,8 +554,18 @@ const App: Component = () => {
               onClick={navigateBackFromProject}
               class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center"
             >
-              <svg class="w-5 h-5 text-neutral-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7" />
+              <svg
+                class="w-5 h-5 text-neutral-300"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M15 19l-7-7 7-7"
+                />
               </svg>
             </button>
           </div>
@@ -453,8 +575,18 @@ const App: Component = () => {
             {/* Clean project artwork - simple dark card */}
             <div class="px-8 pb-6">
               <div class="aspect-square w-full max-w-[280px] mx-auto rounded-xl shadow-elevated bg-neutral-900 flex items-center justify-center">
-                <svg class="w-24 h-24 text-neutral-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                <svg
+                  class="w-24 h-24 text-neutral-700"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="1"
+                    d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                  />
                 </svg>
               </div>
             </div>
@@ -464,9 +596,7 @@ const App: Component = () => {
               <div class="flex items-end justify-between">
                 <div class="flex-1">
                   <h1 class="text-2xl font-bold mb-1">{currentProject()?.name || "Project"}</h1>
-                  <p class="text-sm text-neutral-500">
-                    {mixEntries().length} mixes
-                  </p>
+                  <p class="text-sm text-neutral-500">{mixEntries().length} mixes</p>
                 </div>
                 <button class="w-14 h-14 rounded-full bg-white flex items-center justify-center shadow-card">
                   <svg class="w-7 h-7 text-black ml-1" fill="currentColor" viewBox="0 0 24 24">
@@ -483,7 +613,12 @@ const App: Component = () => {
                 class="w-full py-3 rounded-xl bg-neutral-900 text-neutral-300 font-medium flex items-center justify-center gap-2"
               >
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 4v16m8-8H4"
+                  />
                 </svg>
                 Add mix
               </button>
@@ -496,7 +631,9 @@ const App: Component = () => {
                 fallback={
                   <div class="text-center py-12 text-neutral-500">
                     <p class="text-sm">No mixes yet</p>
-                    <p class="text-xs mt-1 text-neutral-600">Tap "Add mix" to create your first recording</p>
+                    <p class="text-xs mt-1 text-neutral-600">
+                      Tap "Add mix" to create your first recording
+                    </p>
                   </div>
                 }
               >
@@ -509,20 +646,37 @@ const App: Component = () => {
                         onClick={() => handleEntryClick(entry)}
                         class="w-10 h-10 rounded-full bg-neutral-800 flex items-center justify-center"
                       >
-                        <svg class="w-4 h-4 ml-0.5 text-neutral-300" fill="currentColor" viewBox="0 0 24 24">
+                        <svg
+                          class="w-4 h-4 ml-0.5 text-neutral-300"
+                          fill="currentColor"
+                          viewBox="0 0 24 24"
+                        >
                           <path d="M8 5.14v14l11-7-11-7z" />
                         </svg>
                       </button>
-                      <div
-                        onClick={() => handleEntryClick(entry)}
-                        class="flex-1 cursor-pointer"
-                      >
+                      <div onClick={() => handleEntryClick(entry)} class="flex-1 cursor-pointer">
                         <div class="font-medium text-neutral-200">{entry.name}</div>
                         <div class="text-sm text-neutral-500 flex items-center gap-1">
-                          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          <svg
+                            class="w-3.5 h-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              stroke-linecap="round"
+                              stroke-linejoin="round"
+                              stroke-width="2"
+                              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                            />
                           </svg>
-                          {entry.modified_at ? new Date(entry.modified_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'No date'}
+                          {entry.modified_at
+                            ? new Date(entry.modified_at).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : "No date"}
                         </div>
                       </div>
                       <button
@@ -559,8 +713,18 @@ const App: Component = () => {
                 class="w-full p-4 rounded-xl bg-neutral-800 text-left flex items-center gap-4"
               >
                 <div class="w-12 h-12 rounded-xl bg-neutral-700 flex items-center justify-center">
-                  <svg class="w-6 h-6 text-neutral-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                  <svg
+                    class="w-6 h-6 text-neutral-300"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"
+                    />
                   </svg>
                 </div>
                 <div>
@@ -573,8 +737,18 @@ const App: Component = () => {
                 class="w-full p-4 rounded-xl bg-neutral-800 text-left flex items-center gap-4"
               >
                 <div class="w-12 h-12 rounded-xl bg-neutral-700 flex items-center justify-center">
-                  <svg class="w-6 h-6 text-neutral-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  <svg
+                    class="w-6 h-6 text-neutral-300"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
+                    />
                   </svg>
                 </div>
                 <div>
@@ -587,8 +761,18 @@ const App: Component = () => {
                 class="w-full p-4 rounded-xl bg-neutral-800 text-left flex items-center gap-4"
               >
                 <div class="w-12 h-12 rounded-xl bg-neutral-700 flex items-center justify-center">
-                  <svg class="w-6 h-6 text-neutral-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                  <svg
+                    class="w-6 h-6 text-neutral-300"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+                    />
                   </svg>
                 </div>
                 <div>
@@ -612,7 +796,12 @@ const App: Component = () => {
         <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-5">
             <h2 class="text-lg font-semibold mb-3 text-neutral-200">
-              New {isCreating() === "collection" ? "Collection" : isCreating() === "project" ? "Project" : "Mix"}
+              New{" "}
+              {isCreating() === "collection"
+                ? "Collection"
+                : isCreating() === "project"
+                  ? "Project"
+                  : "Mix"}
             </h2>
             <input
               type="text"
@@ -620,9 +809,11 @@ const App: Component = () => {
               onInput={(e) => setNewName(e.currentTarget.value)}
               onKeyPress={(e) => e.key === "Enter" && handleCreate()}
               placeholder={
-                isCreating() === "collection" ? "Collection name..." :
-                isCreating() === "project" ? "Project name..." :
-                "Mix name..."
+                isCreating() === "collection"
+                  ? "Collection name..."
+                  : isCreating() === "project"
+                    ? "Project name..."
+                    : "Mix name..."
               }
               class="w-full px-4 py-3 bg-neutral-800 rounded-xl text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-neutral-600"
               autofocus
@@ -651,10 +842,7 @@ const App: Component = () => {
 
       {/* Context Menu - Clean style */}
       <Show when={menuEntry()}>
-        <div
-          class="fixed inset-0 z-50"
-          onClick={() => setMenuEntry(null)}
-        >
+        <div class="fixed inset-0 z-50" onClick={() => setMenuEntry(null)}>
           <div class="absolute bottom-0 left-0 right-0 bg-neutral-900 rounded-t-2xl p-4 pb-8">
             <div class="w-12 h-1 bg-neutral-700 rounded-full mx-auto mb-4" />
             <h3 class="font-semibold mb-4 text-center text-neutral-200">{menuEntry()?.name}</h3>
@@ -668,10 +856,12 @@ const App: Component = () => {
                     if (!entry) return;
                     try {
                       // Load the mix to get track info
-                      const mixData = await invoke<any>("load_mix", { mixPath: entry.path });
+                      const mixData = await invoke<Mix>("load_mix", { mixPath: entry.path });
                       const tracks = mixData.tracks
-                        .filter((t: any) => t.clip)
-                        .map((t: any) => ({
+                        .filter(
+                          (t): t is Track & { clip: NonNullable<Track["clip"]> } => t.clip !== null,
+                        )
+                        .map((t) => ({
                           path: `${entry.path}/${t.clip.audio_file}`,
                           volume: t.volume,
                           muted: t.muted,
@@ -696,7 +886,12 @@ const App: Component = () => {
                   class="w-full py-3 rounded-xl bg-neutral-800 text-blue-400 font-medium flex items-center justify-center gap-2"
                 >
                   <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                    />
                   </svg>
                   Export Mix
                 </button>
@@ -710,7 +905,12 @@ const App: Component = () => {
                 class="w-full py-3 rounded-xl bg-neutral-800 text-destructive font-medium flex items-center justify-center gap-2"
               >
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                  />
                 </svg>
                 Move to Trash
               </button>
@@ -729,9 +929,12 @@ const App: Component = () => {
       <Show when={confirmDelete()}>
         <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div class="bg-neutral-900 rounded-2xl w-full max-w-sm p-5">
-            <h2 class="text-lg font-semibold mb-2 text-neutral-200">Delete "{confirmDelete()?.name}"?</h2>
+            <h2 class="text-lg font-semibold mb-2 text-neutral-200">
+              Delete "{confirmDelete()?.name}"?
+            </h2>
             <p class="text-sm text-neutral-500 mb-4">
-              This will move the {getTypeLabel(confirmDelete()?.entry_type || "")} to your Trash. You can restore it from there if needed.
+              This will move the {getTypeLabel(confirmDelete()?.entry_type || "")} to your Trash.
+              You can restore it from there if needed.
             </p>
             <div class="flex gap-3">
               <button
@@ -755,7 +958,6 @@ const App: Component = () => {
           </div>
         </div>
       </Show>
-
     </div>
   );
 };

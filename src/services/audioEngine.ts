@@ -34,7 +34,7 @@ export const spliceRecording = (
   originalPath: string,
   newRecordingPath: string,
   startMs: number,
-  outputPath: string
+  outputPath: string,
 ) =>
   invoke<number>("splice_recording", {
     originalPath,
@@ -50,5 +50,5 @@ export const trimAudio = (inputPath: string, outputPath: string, startMs: number
 export const exportMixToFile = (
   tracks: Array<{ path: string; volume: number; muted: boolean }>,
   outputPath: string,
-  sampleRate: number
+  sampleRate: number,
 ) => invoke("export_mix_to_file", { tracks, outputPath, sampleRate });

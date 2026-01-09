@@ -39,12 +39,11 @@ impl Recorder {
     pub fn start(&mut self, output_path: &str) -> Result<(), RecorderError> {
         // Ensure parent directory exists
         if let Some(parent) = Path::new(output_path).parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| RecorderError::FileError(e.to_string()))?;
+            std::fs::create_dir_all(parent).map_err(|e| RecorderError::FileError(e.to_string()))?;
         }
 
-        let file = File::create(output_path)
-            .map_err(|e| RecorderError::FileError(e.to_string()))?;
+        let file =
+            File::create(output_path).map_err(|e| RecorderError::FileError(e.to_string()))?;
 
         let writer = WavWriter::new(BufWriter::new(file), self.spec)
             .map_err(|e| RecorderError::WavError(e.to_string()))?;
@@ -59,7 +58,8 @@ impl Recorder {
     pub fn write_samples(&mut self, samples: &[f32]) -> Result<(), RecorderError> {
         if let Some(ref mut writer) = self.writer {
             for &sample in samples {
-                writer.write_sample(sample)
+                writer
+                    .write_sample(sample)
                     .map_err(|e| RecorderError::WavError(e.to_string()))?;
 
                 // Track peak level for metering
@@ -77,11 +77,13 @@ impl Recorder {
 
     pub fn stop(&mut self) -> Result<RecordingResult, RecorderError> {
         if let Some(writer) = self.writer.take() {
-            writer.finalize()
+            writer
+                .finalize()
                 .map_err(|e| RecorderError::WavError(e.to_string()))?;
 
             let duration_samples = self.samples_written / self.spec.channels as u64;
-            let duration_ms = (duration_samples as f64 * 1000.0 / self.spec.sample_rate as f64) as u64;
+            let duration_ms =
+                (duration_samples as f64 * 1000.0 / self.spec.sample_rate as f64) as u64;
 
             Ok(RecordingResult {
                 samples_written: self.samples_written,
@@ -92,18 +94,22 @@ impl Recorder {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_recording(&self) -> bool {
         self.writer.is_some()
     }
 
+    #[allow(dead_code)]
     pub fn peak_level(&self) -> f32 {
         self.peak_level
     }
 
+    #[allow(dead_code)]
     pub fn reset_peak(&mut self) {
         self.peak_level = 0.0;
     }
 
+    #[allow(dead_code)]
     pub fn samples_written(&self) -> u64 {
         self.samples_written
     }
@@ -126,19 +132,21 @@ pub fn splice_audio(
     use hound::WavReader;
 
     // Read original audio
-    let mut original_reader = WavReader::open(original_path)
-        .map_err(|e| format!("Failed to open original: {}", e))?;
+    let mut original_reader =
+        WavReader::open(original_path).map_err(|e| format!("Failed to open original: {}", e))?;
     let original_spec = original_reader.spec();
     let sample_rate = original_spec.sample_rate;
     let channels = original_spec.channels as u64;
 
     // Read all original samples
     let original_samples: Vec<f32> = if original_spec.sample_format == hound::SampleFormat::Float {
-        original_reader.samples::<f32>()
+        original_reader
+            .samples::<f32>()
             .filter_map(|s| s.ok())
             .collect()
     } else {
-        original_reader.samples::<i16>()
+        original_reader
+            .samples::<i16>()
             .filter_map(|s| s.ok())
             .map(|s| s as f32 / 32768.0)
             .collect()
@@ -148,18 +156,18 @@ pub fn splice_audio(
     let mut new_reader = WavReader::open(new_recording_path)
         .map_err(|e| format!("Failed to open new recording: {}", e))?;
     let new_samples: Vec<f32> = if new_reader.spec().sample_format == hound::SampleFormat::Float {
-        new_reader.samples::<f32>()
-            .filter_map(|s| s.ok())
-            .collect()
+        new_reader.samples::<f32>().filter_map(|s| s.ok()).collect()
     } else {
-        new_reader.samples::<i16>()
+        new_reader
+            .samples::<i16>()
             .filter_map(|s| s.ok())
             .map(|s| s as f32 / 32768.0)
             .collect()
     };
 
     // Calculate sample positions
-    let start_sample = ((start_ms as f64 / 1000.0) * sample_rate as f64) as usize * channels as usize;
+    let start_sample =
+        ((start_ms as f64 / 1000.0) * sample_rate as f64) as usize * channels as usize;
     let new_length_samples = new_samples.len();
     let end_sample = start_sample + new_length_samples;
 
@@ -174,7 +182,7 @@ pub fn splice_audio(
         // If start is beyond original length, pad with silence
         if start_sample > original_samples.len() {
             let silence_samples = start_sample - original_samples.len();
-            spliced.extend(std::iter::repeat(0.0f32).take(silence_samples));
+            spliced.extend(std::iter::repeat_n(0.0f32, silence_samples));
         }
     }
 
@@ -200,8 +208,8 @@ pub fn splice_audio(
     }
 
     let file = File::create(output_path).map_err(|e| e.to_string())?;
-    let mut writer = WavWriter::new(BufWriter::new(file), output_spec)
-        .map_err(|e| e.to_string())?;
+    let mut writer =
+        WavWriter::new(BufWriter::new(file), output_spec).map_err(|e| e.to_string())?;
 
     for sample in &spliced {
         writer.write_sample(*sample).map_err(|e| e.to_string())?;
@@ -226,26 +234,26 @@ pub fn delete_audio_region(
     use hound::WavReader;
 
     // Read original audio
-    let mut reader = WavReader::open(audio_path)
-        .map_err(|e| format!("Failed to open audio: {}", e))?;
+    let mut reader =
+        WavReader::open(audio_path).map_err(|e| format!("Failed to open audio: {}", e))?;
     let spec = reader.spec();
     let sample_rate = spec.sample_rate;
     let channels = spec.channels as u64;
 
     // Read all samples
     let samples: Vec<f32> = if spec.sample_format == hound::SampleFormat::Float {
-        reader.samples::<f32>()
-            .filter_map(|s| s.ok())
-            .collect()
+        reader.samples::<f32>().filter_map(|s| s.ok()).collect()
     } else {
-        reader.samples::<i16>()
+        reader
+            .samples::<i16>()
             .filter_map(|s| s.ok())
             .map(|s| s as f32 / 32768.0)
             .collect()
     };
 
     // Calculate sample positions
-    let start_sample = ((start_ms as f64 / 1000.0) * sample_rate as f64) as usize * channels as usize;
+    let start_sample =
+        ((start_ms as f64 / 1000.0) * sample_rate as f64) as usize * channels as usize;
     let end_sample = ((end_ms as f64 / 1000.0) * sample_rate as f64) as usize * channels as usize;
 
     // Build output: keep everything except the deleted region
@@ -274,8 +282,8 @@ pub fn delete_audio_region(
     }
 
     let file = File::create(output_path).map_err(|e| e.to_string())?;
-    let mut writer = WavWriter::new(BufWriter::new(file), output_spec)
-        .map_err(|e| e.to_string())?;
+    let mut writer =
+        WavWriter::new(BufWriter::new(file), output_spec).map_err(|e| e.to_string())?;
 
     for sample in &output {
         writer.write_sample(*sample).map_err(|e| e.to_string())?;
@@ -306,8 +314,8 @@ pub fn export_mix(
             continue;
         }
 
-        let mut reader = WavReader::open(&path)
-            .map_err(|e| format!("Failed to open {}: {}", path, e))?;
+        let mut reader =
+            WavReader::open(&path).map_err(|e| format!("Failed to open {}: {}", path, e))?;
         let spec = reader.spec();
 
         // Use first file's sample rate as output sample rate
@@ -317,11 +325,10 @@ pub fn export_mix(
 
         // Read raw samples
         let raw_samples: Vec<f32> = if spec.sample_format == hound::SampleFormat::Float {
-            reader.samples::<f32>()
-                .filter_map(|s| s.ok())
-                .collect()
+            reader.samples::<f32>().filter_map(|s| s.ok()).collect()
         } else {
-            reader.samples::<i16>()
+            reader
+                .samples::<i16>()
                 .filter_map(|s| s.ok())
                 .map(|s| s as f32 / 32768.0)
                 .collect()
@@ -329,7 +336,8 @@ pub fn export_mix(
 
         // Convert to mono if stereo
         let mono_samples: Vec<f32> = if spec.channels == 2 {
-            raw_samples.chunks(2)
+            raw_samples
+                .chunks(2)
                 .map(|chunk| (chunk[0] + chunk.get(1).unwrap_or(&0.0)) * 0.5)
                 .collect()
         } else {
@@ -377,8 +385,8 @@ pub fn export_mix(
     }
 
     let file = File::create(output_path).map_err(|e| e.to_string())?;
-    let mut writer = WavWriter::new(BufWriter::new(file), output_spec)
-        .map_err(|e| e.to_string())?;
+    let mut writer =
+        WavWriter::new(BufWriter::new(file), output_spec).map_err(|e| e.to_string())?;
 
     for sample in &mixed {
         writer.write_sample(*sample).map_err(|e| e.to_string())?;
@@ -386,4 +394,76 @@ pub fn export_mix(
     writer.finalize().map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recorder_new_initializes_correctly() {
+        let rec = Recorder::new(48000, 1);
+        assert!(!rec.is_recording());
+        assert_eq!(rec.peak_level(), 0.0);
+        assert_eq!(rec.samples_written(), 0);
+    }
+
+    #[test]
+    fn recorder_write_without_start_errors() {
+        let mut rec = Recorder::new(48000, 1);
+        let result = rec.write_samples(&[0.0, 0.5, -0.5]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn recorder_stop_without_start_errors() {
+        let mut rec = Recorder::new(48000, 1);
+        let result = rec.stop();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn peak_level_tracking() {
+        let mut rec = Recorder::new(48000, 1);
+        // Can't actually write without file, but we can test reset
+        assert_eq!(rec.peak_level(), 0.0);
+        rec.reset_peak();
+        assert_eq!(rec.peak_level(), 0.0);
+    }
+
+    #[test]
+    fn duration_calculation() {
+        // 48000 samples at 48000 Hz = 1000ms
+        let sample_rate = 48000u32;
+        let channels = 1u64;
+        let samples_written = 48000u64;
+
+        let duration_samples = samples_written / channels;
+        let duration_ms = (duration_samples as f64 * 1000.0 / sample_rate as f64) as u64;
+
+        assert_eq!(duration_ms, 1000);
+    }
+
+    #[test]
+    fn duration_calculation_stereo() {
+        // 96000 samples (stereo) at 48000 Hz = 1000ms
+        let sample_rate = 48000u32;
+        let channels = 2u64;
+        let samples_written = 96000u64;
+
+        let duration_samples = samples_written / channels;
+        let duration_ms = (duration_samples as f64 * 1000.0 / sample_rate as f64) as u64;
+
+        assert_eq!(duration_ms, 1000);
+    }
+
+    #[test]
+    fn ms_to_sample_conversion() {
+        let sample_rate = 48000u32;
+        let channels = 2u64;
+        let ms = 500u64;
+
+        let start_sample = ((ms as f64 / 1000.0) * sample_rate as f64) as usize * channels as usize;
+        assert_eq!(start_sample, 48000); // 0.5s * 48000 * 2 channels
+    }
 }

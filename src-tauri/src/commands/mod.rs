@@ -1,5 +1,5 @@
-use crate::audio::{splice_audio, delete_audio_region, export_mix, AudioEngine, TrackInfo};
-use crate::project::{self, Clip, Collection, FolderEntry, Mix, Project};
+use crate::audio::{delete_audio_region, export_mix, splice_audio, AudioEngine, TrackInfo};
+use crate::project::{self, Collection, FolderEntry, Mix, Project};
 use std::sync::Arc;
 use tauri::State;
 
@@ -53,7 +53,11 @@ pub fn start_recording(
     let filename = format!(
         "track_{}_{}.wav",
         track_index,
-        uuid::Uuid::new_v4().to_string().split('-').next().unwrap_or("0")
+        uuid::Uuid::new_v4()
+            .to_string()
+            .split('-')
+            .next()
+            .unwrap_or("0")
     );
     let audio_path = format!("{}/audio/{}", project_path, filename);
 

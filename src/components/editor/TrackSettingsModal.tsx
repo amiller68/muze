@@ -1,6 +1,6 @@
-import { Component, For, Show } from "solid-js";
-import type { Mix } from "../../types/mix";
+import { type Component, For, Show } from "solid-js";
 import { TRACK_LIMIT } from "../../constants/config";
+import type { Mix } from "../../types/mix";
 
 interface TrackSettingsModalProps {
   mix: Mix | null;
@@ -40,9 +40,7 @@ export const TrackSettingsModal: Component<TrackSettingsModalProps> = (props) =>
                   max="1"
                   step="0.01"
                   value={track.volume}
-                  onInput={(e) =>
-                    props.onUpdateVolume(i(), parseFloat(e.currentTarget.value))
-                  }
+                  onInput={(e) => props.onUpdateVolume(i(), parseFloat(e.currentTarget.value))}
                   class="flex-1"
                 />
                 <button
@@ -75,7 +73,11 @@ export const TrackSettingsModal: Component<TrackSettingsModalProps> = (props) =>
                       : "bg-neutral-800 text-neutral-700 cursor-not-allowed"
                   }`}
                   disabled={(props.mix?.tracks.length || 0) <= 1}
-                  title={(props.mix?.tracks.length || 0) <= 1 ? "Can't delete last track" : "Delete track"}
+                  title={
+                    (props.mix?.tracks.length || 0) <= 1
+                      ? "Can't delete last track"
+                      : "Delete track"
+                  }
                 >
                   X
                 </button>
