@@ -1,7 +1,7 @@
 import { Component, createSignal, Show, For, onMount } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import { MixEditor } from "./components/editor/MixEditor";
-import { useMixStore } from "./stores/projectStore";
+import { useMixStore } from "./stores/mixStore";
 
 interface FolderEntry {
   name: string;
@@ -295,8 +295,8 @@ const App: Component = () => {
             </button>
           </div>
 
-          {/* Grid */}
-          <div class="flex-1 overflow-y-auto px-4 pb-24">
+          {/* List View */}
+          <div class="flex-1 overflow-y-auto pb-24">
             <Show
               when={entries().length > 0}
               fallback={
@@ -309,8 +309,8 @@ const App: Component = () => {
                 </div>
               }
             >
-              <div class="grid grid-cols-4 gap-3">
-                {/* Sort: collections first, then projects, then mixes - for optimal packing */}
+              <div class="divide-y divide-neutral-800">
+                {/* Sort: collections first, then projects, then mixes */}
                 <For each={[...filteredEntries()].sort((a, b) => {
                   const order = { collection: 0, project: 1, mix: 2, unknown: 3 };
                   return (order[a.entry_type] || 3) - (order[b.entry_type] || 3);
@@ -321,154 +321,83 @@ const App: Component = () => {
                     const isProject = entry.entry_type === "project";
 
                     return (
-                      <div class={isMix ? "col-span-1" : "col-span-2"}>
-                        <Show when={isMix}>
-                          {/* Mix: Square card with waveform pattern */}
-                          <div class="relative group">
-                            <button
-                              onClick={() => handleEntryClick(entry)}
-                              class="w-full aspect-square rounded-xl bg-neutral-900 shadow-card flex items-center justify-center relative overflow-hidden mb-1.5"
-                            >
-                              {/* Waveform bars pattern - neutral gray */}
-                              <div class="absolute inset-0 flex items-center justify-center gap-0.5 px-2">
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 24%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 42%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 30%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 54%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 36%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 48%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 30%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 42%" />
-                                <div class="w-1 bg-neutral-700 rounded-full" style="height: 24%" />
-                              </div>
-                              {/* Play button overlay */}
-                              <div class="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-white/10 flex items-center justify-center">
-                                <svg class="w-3 h-3 ml-0.5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M8 5.14v14l11-7-11-7z" />
-                                </svg>
-                              </div>
-                            </button>
-                            {/* Menu button */}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setMenuEntry(entry);
-                              }}
-                              class="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-neutral-700 flex items-center justify-center opacity-0 group-hover:opacity-100"
-                            >
-                              <svg class="w-2.5 h-2.5 text-neutral-300" fill="currentColor" viewBox="0 0 24 24">
-                                <circle cx="12" cy="6" r="2" />
-                                <circle cx="12" cy="12" r="2" />
-                                <circle cx="12" cy="18" r="2" />
-                              </svg>
-                            </button>
-                          </div>
-                          <div class="text-center">
-                            <div class="text-xs font-medium truncate px-0.5 text-neutral-200">{entry.name}</div>
-                          </div>
-                        </Show>
+                      <div
+                        class="flex items-center gap-3 px-4 py-3 active:bg-neutral-900"
+                        onClick={() => handleEntryClick(entry)}
+                      >
+                        {/* Icon */}
+                        <div class={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
+                          isMix ? "bg-neutral-800" : isProject ? "bg-neutral-800" : "bg-neutral-800"
+                        }`}>
+                          <Show when={isMix}>
+                            <svg class="w-6 h-6 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3" />
+                            </svg>
+                          </Show>
+                          <Show when={isProject}>
+                            <svg class="w-6 h-6 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                            </svg>
+                          </Show>
+                          <Show when={isFolder}>
+                            <svg class="w-6 h-6 text-neutral-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                            </svg>
+                          </Show>
+                        </div>
 
-                        <Show when={!isMix}>
-                          {/* Projects and Collections: Clean card with icon */}
-                          <button
-                            onClick={() => handleEntryClick(entry)}
-                            class="relative w-full aspect-square rounded-xl overflow-hidden mb-1.5 bg-neutral-900 shadow-card"
-                          >
-                            {/* Collection: Show 2x2 grid of child previews or folder icon */}
+                        {/* Content */}
+                        <div class="flex-1 min-w-0">
+                          <div class="font-medium text-neutral-200 truncate">{entry.name}</div>
+                          <div class="text-sm text-neutral-500">
                             <Show when={isFolder}>
-                              <Show
-                                when={entry.children && entry.children.length > 0}
-                                fallback={
-                                  <div class="absolute inset-0 flex items-center justify-center">
-                                    <svg class="w-16 h-16 text-neutral-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                                    </svg>
-                                  </div>
-                                }
-                              >
-                                <div class="absolute inset-0 grid grid-cols-2 grid-rows-2 gap-0.5 p-1">
-                                  <For each={entry.children?.slice(0, 4)}>
-                                    {(child) => {
-                                      const isChildMix = child.entry_type === "mix";
-                                      const isChildFolder = child.entry_type === "collection";
-
-                                      return (
-                                        <div class="rounded-md overflow-hidden flex items-center justify-center bg-neutral-800">
-                                          <Show when={isChildMix}>
-                                            <div class="flex items-center justify-center gap-px">
-                                              <div class="w-0.5 bg-neutral-600 rounded-full" style="height: 20%" />
-                                              <div class="w-0.5 bg-neutral-600 rounded-full" style="height: 35%" />
-                                              <div class="w-0.5 bg-neutral-600 rounded-full" style="height: 45%" />
-                                              <div class="w-0.5 bg-neutral-600 rounded-full" style="height: 30%" />
-                                              <div class="w-0.5 bg-neutral-600 rounded-full" style="height: 20%" />
-                                            </div>
-                                          </Show>
-                                          <Show when={isChildFolder}>
-                                            <svg class="w-5 h-5 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
-                                            </svg>
-                                          </Show>
-                                          <Show when={!isChildMix && !isChildFolder}>
-                                            <svg class="w-5 h-5 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                                            </svg>
-                                          </Show>
-                                        </div>
-                                      );
-                                    }}
-                                  </For>
-                                  {/* Fill empty slots */}
-                                  <For each={Array(Math.max(0, 4 - (entry.children?.length || 0))).fill(0)}>
-                                    {() => <div class="rounded-md bg-neutral-800/50" />}
-                                  </For>
-                                </div>
-                              </Show>
+                              {entry.children?.length || 0} items
                             </Show>
-
-                            {/* Project: Show project icon */}
                             <Show when={isProject}>
-                              <div class="absolute inset-0 flex items-center justify-center">
-                                <svg class="w-16 h-16 text-neutral-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                                </svg>
-                              </div>
-                              {/* Play button for projects */}
-                              <div class="absolute bottom-2 right-2 w-10 h-10 rounded-full bg-white/10 flex items-center justify-center">
-                                <svg class="w-5 h-5 ml-0.5 text-white" fill="currentColor" viewBox="0 0 24 24">
-                                  <path d="M8 5.14v14l11-7-11-7z" />
-                                </svg>
-                              </div>
+                              Project
                             </Show>
-                          </button>
-
-                          {/* Info below card */}
-                          <div class="flex items-start justify-between">
-                            <div class="flex-1 min-w-0">
-                              <div class="text-sm font-semibold truncate text-neutral-200">{entry.name}</div>
-                              <div class="text-xs text-neutral-500">
-                                <Show when={entry.entry_type === "collection"}>
-                                  {entry.children?.length || 0} items
-                                </Show>
-                                <Show when={entry.entry_type === "project"}>
-                                  Project
-                                </Show>
-                              </div>
-                            </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setMenuEntry(entry);
-                              }}
-                              class="w-8 h-8 flex items-center justify-center text-neutral-500"
-                            >
-                              <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-                                <circle cx="5" cy="12" r="1.5" />
-                                <circle cx="12" cy="12" r="1.5" />
-                                <circle cx="19" cy="12" r="1.5" />
-                              </svg>
-                            </button>
+                            <Show when={isMix}>
+                              {entry.modified_at
+                                ? new Date(entry.modified_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                : 'Mix'}
+                            </Show>
                           </div>
+                        </div>
+
+                        {/* Chevron for folders/projects, play for mixes */}
+                        <Show when={!isMix}>
+                          <svg class="w-5 h-5 text-neutral-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                          </svg>
                         </Show>
+                        <Show when={isMix}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEntryClick(entry);
+                            }}
+                            class="w-10 h-10 rounded-full bg-neutral-700 flex items-center justify-center"
+                          >
+                            <svg class="w-4 h-4 ml-0.5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                              <path d="M8 5.14v14l11-7-11-7z" />
+                            </svg>
+                          </button>
+                        </Show>
+
+                        {/* Menu button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuEntry(entry);
+                          }}
+                          class="w-8 h-8 flex items-center justify-center text-neutral-600"
+                        >
+                          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <circle cx="12" cy="6" r="1.5" />
+                            <circle cx="12" cy="12" r="1.5" />
+                            <circle cx="12" cy="18" r="1.5" />
+                          </svg>
+                        </button>
                       </div>
                     );
                   }}

@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
 import type { Mix, Track, Clip } from "../types/project";
 import { TRACK_COLORS } from "../constants/theme";
+import { AUTO_SAVE_DEBOUNCE_MS } from "../constants/config";
 
 const [currentMix, setCurrentMix] = createSignal<Mix | null>(null);
 const [mixPath, setMixPath] = createSignal<string | null>(null);
@@ -19,13 +20,12 @@ const autoSave = () => {
     if (mix && path) {
       try {
         await invoke("save_project", { project: mix, projectPath: path });
-        console.log("Auto-saved mix");
         setIsDirty(false);
       } catch (e) {
-        console.error("Auto-save failed:", e);
+        // Auto-save failed silently
       }
     }
-  }, 300); // 300ms debounce
+  }, AUTO_SAVE_DEBOUNCE_MS);
 };
 
 export function useMixStore() {
@@ -43,27 +43,20 @@ export function useMixStore() {
   };
 
   const loadMix = async (path: string) => {
-    console.log("loadMix called with path:", path);
-    try {
-      // Stop any current playback and reset position before loading new mix
-      await invoke("pause").catch(() => {});
-      await invoke("seek", { positionMs: 0 }).catch(() => {});
+    // Stop any current playback and reset position before loading new mix
+    await invoke("pause").catch(() => {});
+    await invoke("seek", { positionMs: 0 }).catch(() => {});
 
-      const mix = await invoke<Mix>("load_project", { projectPath: path });
-      console.log("Mix loaded:", mix);
-      setCurrentMix(mix);
-      setMixPath(path);
-      setIsDirty(false);
-      if (mix.tracks.length > 0) {
-        setSelectedTrack(0);
-      }
-      // Load audio tracks into engine
-      await loadTracksIntoEngine(mix, path);
-      return mix;
-    } catch (e) {
-      console.error("loadMix error:", e);
-      throw e;
+    const mix = await invoke<Mix>("load_project", { projectPath: path });
+    setCurrentMix(mix);
+    setMixPath(path);
+    setIsDirty(false);
+    if (mix.tracks.length > 0) {
+      setSelectedTrack(0);
     }
+    // Load audio tracks into engine
+    await loadTracksIntoEngine(mix, path);
+    return mix;
   };
 
   const loadTracksIntoEngine = async (mix: Mix, path: string) => {
@@ -72,13 +65,7 @@ export function useMixStore() {
       volume: t.volume,
       muted: t.muted,
     }));
-    console.log("Loading tracks into engine:", { path, trackCount: tracks.length, tracks });
-    try {
-      await invoke("load_tracks", { projectPath: path, tracks });
-      console.log("Tracks loaded successfully");
-    } catch (e) {
-      console.error("Failed to load tracks into engine:", e);
-    }
+    await invoke("load_tracks", { projectPath: path, tracks }).catch(() => {});
   };
 
   const saveMix = async () => {

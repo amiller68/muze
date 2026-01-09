@@ -1,6 +1,17 @@
 import { Component, createSignal, createEffect, onMount, onCleanup, Show, For } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { useMixStore } from "../../stores/projectStore";
+import { useMixStore } from "../../stores/mixStore";
+import { TrackSettingsModal } from "./TrackSettingsModal";
+import {
+  MIN_TIMELINE_MS,
+  ZOOM_MIN,
+  ZOOM_MAX,
+  ZOOM_FACTOR,
+  PINCH_ZOOM_FACTOR,
+  POSITION_POLL_MS,
+  LEVEL_POLL_MS,
+  SKIP_DELTA_MS,
+} from "../../constants/config";
 
 interface MixEditorProps {
   onDone: () => void;
@@ -28,8 +39,6 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
   let waveformRef: HTMLDivElement | undefined;
   let positionInterval: number | undefined;
   let levelInterval: number | undefined;
-
-  const MIN_TIMELINE_MS = 15000; // 15 seconds default
 
   // Track which mix is loaded to detect when a NEW mix is opened
   let lastMixId: string | null = null;
@@ -67,7 +76,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           setIsPlaying(false);
         }
       } catch (e) {}
-    }, 30);
+    }, POSITION_POLL_MS);
 
     // Poll input level for live waveform during recording
     levelInterval = window.setInterval(async () => {
@@ -79,7 +88,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           setRecordingWaveform((prev) => [...prev.slice(-200), level]);
         }
       } catch (e) {}
-    }, 50);
+    }, LEVEL_POLL_MS);
   });
 
   onCleanup(() => {
@@ -104,8 +113,8 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     return base / zoomLevel();
   };
 
-  const handleZoomIn = () => setZoomLevel((z) => Math.min(z * 1.5, 8));
-  const handleZoomOut = () => setZoomLevel((z) => Math.max(z / 1.5, 0.25));
+  const handleZoomIn = () => setZoomLevel((z) => Math.min(z * ZOOM_FACTOR, ZOOM_MAX));
+  const handleZoomOut = () => setZoomLevel((z) => Math.max(z / ZOOM_FACTOR, ZOOM_MIN));
 
   // Handle wheel zoom
   const handleWheel = (e: WheelEvent) => {
@@ -141,9 +150,9 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         const delta = distance - lastTouchDistance;
         if (Math.abs(delta) > 5) {
           if (delta > 0) {
-            setZoomLevel((z) => Math.min(z * 1.05, 8));
+            setZoomLevel((z) => Math.min(z * PINCH_ZOOM_FACTOR, ZOOM_MAX));
           } else {
-            setZoomLevel((z) => Math.max(z / 1.05, 0.25));
+            setZoomLevel((z) => Math.max(z / PINCH_ZOOM_FACTOR, ZOOM_MIN));
           }
           lastTouchDistance = distance;
         }
@@ -180,50 +189,34 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     const x = e.clientX - rect.left;
     const normalized = x / rect.width;
     const positionMs = Math.floor(normalized * getTimelineScale());
-    try {
-      await invoke("seek", { positionMs });
-      setPlayheadMs(positionMs);
-    } catch (e) {
-      console.error("Seek failed:", e);
-    }
+    await invoke("seek", { positionMs }).catch(() => {});
+    setPlayheadMs(positionMs);
   };
 
   const handlePlayStop = async () => {
-    try {
-      if (isPlaying()) {
-        if (isRecording()) {
-          await handleStopRecording();
-        }
-        await invoke("pause");
-        setIsPlaying(false);
-        // Keep playhead where it is - don't reset
-      } else {
-        await invoke("play");
-        setIsPlaying(true);
+    if (isPlaying()) {
+      if (isRecording()) {
+        await handleStopRecording();
       }
-    } catch (e) {
-      console.error("Play/stop failed:", e);
+      await invoke("pause").catch(() => {});
+      setIsPlaying(false);
+    } else {
+      await invoke("play").catch(() => {});
+      setIsPlaying(true);
     }
   };
 
   const handleSkip = async (deltaMs: number) => {
     const maxPos = getContentDuration();
     const newPos = Math.max(0, Math.min(maxPos, playheadMs() + deltaMs));
-    try {
-      await invoke("seek", { positionMs: newPos });
-      setPlayheadMs(newPos);
-    } catch (e) {
-      console.error("Skip failed:", e);
-    }
+    await invoke("seek", { positionMs: newPos }).catch(() => {});
+    setPlayheadMs(newPos);
   };
 
   const handleRecord = async () => {
     const mix = store.currentMix();
     const path = store.mixPath();
-    if (!mix || !path) {
-      console.error("No mix or path");
-      return;
-    }
+    if (!mix || !path) return;
 
     try {
       if (isRecording()) {
@@ -239,21 +232,16 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
 
         const trackIndex = store.selectedTrack();
         const track = mix.tracks[trackIndex];
-        console.log("Starting recording on track", trackIndex, "path", path);
-        console.log("Track data:", track);
-        console.log("Track clip:", track?.clip);
 
         // Clear recording waveform and save start position
         setRecordingWaveform([]);
         // Get position directly from engine to avoid any signal sync issues
         const currentPlayhead = await invoke<number>("get_position");
-        console.log("Capturing playhead position for recording (from engine):", currentPlayhead);
         setRecordingStartMs(currentPlayhead);
 
         // If track has existing clip, save its path for splice operation
         if (track?.clip) {
           const clipPath = `${path}/${track.clip.audio_file}`;
-          console.log("Setting existingClipPath for REPLACE mode:", clipPath);
           setExistingClipPath(clipPath);
           // Mute the track so we don't hear old audio while recording
           store.updateTrackMute(trackIndex, true);
@@ -261,7 +249,6 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           // Seek back to captured position after reload
           await invoke("seek", { positionMs: currentPlayhead });
         } else {
-          console.log("No existing clip - will be NEW recording");
           setExistingClipPath(null);
         }
 
@@ -269,7 +256,6 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           trackIndex,
           projectPath: path,
         });
-        console.log("Recording started, filename:", filename);
 
         setRecordingFilename(filename);
         setIsRecording(true);
@@ -277,7 +263,6 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         await invoke("play");
       }
     } catch (e) {
-      console.error("Record failed:", e);
       setAudioError(`Recording failed: ${e}`);
     }
   };
@@ -294,21 +279,17 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
       const existingPath = existingClipPath();
       const recordingDuration = playheadMs() - startMs;
 
-      console.log("Stop recording - filename:", filename, "track:", trackIndex, "startMs:", startMs, "recordingDuration:", recordingDuration);
-
       if (filename && recordingDuration > 0 && path) {
         const newRecordingPath = `${path}/audio/${filename}`;
 
         if (existingPath) {
           // REPLACE mode: Splice new recording into existing audio
-          console.log("Splicing into existing clip at", existingPath);
           const newDuration = await invoke<number>("splice_recording", {
             originalPath: existingPath,
             newRecordingPath: newRecordingPath,
             startMs: startMs,
             outputPath: existingPath, // Overwrite original
           });
-          console.log("Splice complete, new duration:", newDuration);
 
           // Pause playback before reloading to avoid audio glitches
           await invoke("pause").catch(() => {});
@@ -322,21 +303,16 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
 
           // Reload the audio into the engine so it plays the new spliced audio
           await store.reloadTracks();
-          console.log("Tracks reloaded into engine");
         } else {
           // NEW recording: Add as new clip
           await store.addClipToTrack(trackIndex, `audio/${filename}`, recordingDuration);
           await store.saveMix();
-          console.log("New clip added and saved");
         }
-      } else {
-        console.log("No clip to add - filename:", filename, "duration:", recordingDuration);
       }
 
       setRecordingFilename(null);
       setExistingClipPath(null);
     } catch (e) {
-      console.error("Stop recording failed:", e);
       alert(`Stop recording failed: ${e}`);
     }
   };
@@ -359,7 +335,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
   const checkPlaybackEnd = () => {
     const contentDuration = getContentDuration();
     if (contentDuration > 0 && playheadMs() >= contentDuration && isPlaying() && !isRecording()) {
-      invoke("pause").catch(console.error);
+      invoke("pause").catch(() => {});
       setIsPlaying(false);
     }
   };
@@ -367,7 +343,9 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
   const currentTrack = () => {
     const mix = store.currentMix();
     if (!mix || mix.tracks.length === 0) return null;
-    return mix.tracks[store.selectedTrack()];
+    const idx = store.selectedTrack();
+    if (idx < 0 || idx >= mix.tracks.length) return null;
+    return mix.tracks[idx];
   };
 
   // Trim mode drag handlers
@@ -917,7 +895,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
       {/* Transport */}
       <div class="flex items-center justify-center gap-8 py-4 bg-black">
         <button
-          onClick={() => handleSkip(-15000)}
+          onClick={() => handleSkip(-SKIP_DELTA_MS)}
           class="w-12 h-12 flex items-center justify-center text-white"
         >
           <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
@@ -942,7 +920,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         </button>
 
         <button
-          onClick={() => handleSkip(15000)}
+          onClick={() => handleSkip(SKIP_DELTA_MS)}
           class="w-12 h-12 flex items-center justify-center text-white"
         >
           <svg class="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
@@ -1050,86 +1028,15 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
 
       {/* Settings Modal */}
       <Show when={showSettings()}>
-        <div class="fixed inset-0 bg-black/80 z-50 flex items-end justify-center">
-          <div class="bg-neutral-900 rounded-t-2xl w-full max-w-md p-6">
-            <div class="flex items-center justify-between mb-6">
-              <h2 class="text-xl font-semibold">Track Settings</h2>
-              <button onClick={() => setShowSettings(false)} class="text-neutral-400">
-                Done
-              </button>
-            </div>
-
-            <div class="space-y-4">
-              <For each={store.currentMix()?.tracks}>
-                {(track, i) => (
-                  <div class="flex items-center gap-3">
-                    <div
-                      class="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-xs text-white font-bold"
-                      style={{ "background-color": track.color }}
-                    >
-                      {i() + 1}
-                    </div>
-                    <span class="w-16 text-sm truncate">{track.name}</span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step="0.01"
-                      value={track.volume}
-                      onInput={(e) =>
-                        store.updateTrackVolume(i(), parseFloat(e.currentTarget.value))
-                      }
-                      class="flex-1"
-                    />
-                    <button
-                      onClick={() => store.updateTrackSolo(i(), !track.solo)}
-                      class={`w-8 h-8 rounded text-xs font-bold ${
-                        track.solo ? "bg-white text-black" : "bg-neutral-700 text-neutral-500"
-                      }`}
-                      title="Solo - isolate this track"
-                    >
-                      S
-                    </button>
-                    <button
-                      onClick={() => store.updateTrackMute(i(), !track.muted)}
-                      class={`w-8 h-8 rounded text-xs font-bold ${
-                        track.muted ? "bg-selection text-black" : "bg-neutral-700 text-neutral-500"
-                      }`}
-                      title="Mute this track"
-                    >
-                      M
-                    </button>
-                    <button
-                      onClick={() => {
-                        if ((store.currentMix()?.tracks.length || 0) > 1) {
-                          store.removeTrack(i());
-                        }
-                      }}
-                      class={`w-8 h-8 rounded text-xs font-bold ${
-                        (store.currentMix()?.tracks.length || 0) > 1
-                          ? "bg-neutral-800 text-destructive"
-                          : "bg-neutral-800 text-neutral-700 cursor-not-allowed"
-                      }`}
-                      disabled={(store.currentMix()?.tracks.length || 0) <= 1}
-                      title={(store.currentMix()?.tracks.length || 0) <= 1 ? "Can't delete last track" : "Delete track"}
-                    >
-                      X
-                    </button>
-                  </div>
-                )}
-              </For>
-            </div>
-
-            <Show when={(store.currentMix()?.tracks.length || 0) < 8}>
-              <button
-                onClick={() => store.addTrack()}
-                class="mt-6 w-full py-3 rounded-lg bg-neutral-800 text-white"
-              >
-                Add Track
-              </button>
-            </Show>
-          </div>
-        </div>
+        <TrackSettingsModal
+          mix={store.currentMix()}
+          onClose={() => setShowSettings(false)}
+          onUpdateVolume={store.updateTrackVolume}
+          onUpdateSolo={store.updateTrackSolo}
+          onUpdateMute={store.updateTrackMute}
+          onRemoveTrack={store.removeTrack}
+          onAddTrack={store.addTrack}
+        />
       </Show>
     </div>
   );
