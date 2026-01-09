@@ -1,0 +1,46 @@
+[package]
+name = "muze"
+version = "0.1.0"
+edition = "2021"
+description = "Multi-track audio recording app"
+license = "MIT"
+
+[lib]
+name = "muze_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "muze"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Audio I/O
+cpal = "0.15"
+
+# Audio encoding/decoding
+hound = "3.5"
+
+# Concurrency
+crossbeam-channel = "0.5"
+
+# Utilities
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-opener = "2"
+trash = "5"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
