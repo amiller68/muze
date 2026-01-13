@@ -23,6 +23,8 @@ import { TrackSettingsModal } from "./TrackSettingsModal";
 
 interface MixEditorProps {
   onDone: () => void;
+  inline?: boolean; // When true, renders as flex child instead of fixed overlay (for desktop)
+  breadcrumb?: string; // Parent name for mobile breadcrumb navigation (e.g., "Projects", "My Album")
 }
 
 export const MixEditor: Component<MixEditorProps> = (props) => {
@@ -468,10 +470,10 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
 
   return (
     <div
-      class="fixed inset-0 flex flex-col bg-black text-white"
+      class={`flex flex-col bg-black text-white ${props.inline ? "h-full" : "fixed inset-0"}`}
       style={{
-        "padding-top": "env(safe-area-inset-top, 0px)",
-        "padding-bottom": "env(safe-area-inset-bottom, 0px)",
+        "padding-top": props.inline ? "0" : "env(safe-area-inset-top, 0px)",
+        "padding-bottom": props.inline ? "0" : "env(safe-area-inset-bottom, 0px)",
       }}
     >
       {/* Header */}
@@ -1050,7 +1052,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           </div>
           {/* Record/Done Row */}
           <div class="flex items-center justify-between">
-            <div class="w-16" />
+            <div class="w-20" />
             <button
               onClick={handleRecord}
               class={`px-8 py-3 rounded-full font-semibold text-lg ${
@@ -1059,21 +1061,32 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
             >
               {isRecording() ? "STOP" : currentTrack()?.clip ? "REPLACE" : "RECORD"}
             </button>
-            <button
-              onClick={async () => {
-                if (isPlaying()) {
-                  await invoke("pause");
-                  setIsPlaying(false);
-                }
-                if (isRecording()) {
-                  await handleStopRecording();
-                }
-                props.onDone();
-              }}
-              class="w-16 text-neutral-400 font-semibold text-right"
-            >
-              Done
-            </button>
+            {/* Mobile: breadcrumb back button, Desktop: empty spacer */}
+            <Show when={!props.inline} fallback={<div class="w-20" />}>
+              <button
+                onClick={async () => {
+                  if (isPlaying()) {
+                    await invoke("pause");
+                    setIsPlaying(false);
+                  }
+                  if (isRecording()) {
+                    await handleStopRecording();
+                  }
+                  props.onDone();
+                }}
+                class="w-20 text-neutral-400 font-medium text-right flex items-center justify-end gap-1"
+              >
+                <span class="truncate text-sm">{props.breadcrumb || "Back"}</span>
+                <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 5l7 7-7 7"
+                  />
+                </svg>
+              </button>
+            </Show>
           </div>
         </div>
       </Show>

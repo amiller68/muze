@@ -1,6 +1,6 @@
 mod model;
 
-pub use model::{Collection, EntryType, FolderEntry, Mix, Project};
+pub use model::{Collection, EntryType, FolderEntry, Mix};
 
 use std::path::Path;
 
@@ -32,36 +32,6 @@ pub fn save_collection(collection: &Collection, collection_path: &str) -> Result
     let json = serde_json::to_string_pretty(collection).map_err(|e| e.to_string())?;
     std::fs::write(format!("{}/collection.json", collection_path), json)
         .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-// ============= Project Operations =============
-
-pub fn create_project(name: &str, parent_path: &str) -> Result<Project, String> {
-    let project = Project::new(name);
-    let safe_name = sanitize_name(name);
-    let project_path = format!("{}/{}", parent_path, safe_name);
-
-    std::fs::create_dir_all(&project_path).map_err(|e| e.to_string())?;
-
-    let json = serde_json::to_string_pretty(&project).map_err(|e| e.to_string())?;
-    std::fs::write(format!("{}/project.json", project_path), json).map_err(|e| e.to_string())?;
-
-    Ok(project)
-}
-
-#[allow(dead_code)]
-pub fn load_project(project_path: &str) -> Result<Project, String> {
-    let json = std::fs::read_to_string(format!("{}/project.json", project_path))
-        .map_err(|e| e.to_string())?;
-    serde_json::from_str(&json).map_err(|e| e.to_string())
-}
-
-#[allow(dead_code)]
-pub fn save_project(project: &Project, project_path: &str) -> Result<(), String> {
-    std::fs::create_dir_all(project_path).map_err(|e| e.to_string())?;
-    let json = serde_json::to_string_pretty(project).map_err(|e| e.to_string())?;
-    std::fs::write(format!("{}/project.json", project_path), json).map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -156,19 +126,19 @@ pub fn list_entries(path: &str) -> Result<Vec<FolderEntry>, String> {
 }
 
 fn detect_entry_type(path: &Path) -> EntryType {
-    if path.join("collection.json").exists() {
-        EntryType::Collection
+    if path.join("mix.json").exists() {
+        EntryType::Mix
     } else if path.join("project.json").exists() {
-        // Check if it's an old-style mix (has tracks) or a new-style project
+        // Old-style mix stored as project.json (has tracks field)
         if let Ok(json) = std::fs::read_to_string(path.join("project.json")) {
             if json.contains("\"tracks\"") {
-                // Old-style mix stored as project.json
                 return EntryType::Mix;
             }
         }
-        EntryType::Project
-    } else if path.join("mix.json").exists() {
-        EntryType::Mix
+        // Old project.json without tracks - treat as collection
+        EntryType::Collection
+    } else if path.join("collection.json").exists() {
+        EntryType::Collection
     } else {
         EntryType::Unknown
     }
@@ -176,8 +146,15 @@ fn detect_entry_type(path: &Path) -> EntryType {
 
 fn get_modified_time(path: &Path, entry_type: &EntryType) -> Option<chrono::DateTime<chrono::Utc>> {
     let json_file = match entry_type {
-        EntryType::Collection => path.join("collection.json"),
-        EntryType::Project => path.join("project.json"),
+        EntryType::Collection => {
+            // Try collection.json first, fall back to project.json for old folders
+            let collection_file = path.join("collection.json");
+            if collection_file.exists() {
+                collection_file
+            } else {
+                path.join("project.json")
+            }
+        }
         EntryType::Mix => {
             let mix_file = path.join("mix.json");
             if mix_file.exists() {
