@@ -211,6 +211,12 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
       await invoke("pause").catch(() => {});
       setIsPlaying(false);
     } else {
+      // If at or past the end of content, seek to beginning first
+      const contentDuration = getContentDuration();
+      if (contentDuration > 0 && playheadMs() >= contentDuration) {
+        await invoke("seek", { positionMs: 0 }).catch(() => {});
+        setPlayheadMs(0);
+      }
       await invoke("play").catch(() => {});
       setIsPlaying(true);
     }
@@ -498,7 +504,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           <div class="text-xs text-neutral-500">
             {trimMode()
               ? `Selection: ${formatTimeShort(trimEnd() - trimStart())}`
-              : `${store.currentMix()?.tracks.length || 0} tracks`}
+              : `${store.currentMix()?.tracks.length || 0} tracks${getContentDuration() > 0 ? ` • ${formatTimeShort(getContentDuration())}` : ""}`}
           </div>
         </div>
         <div class="flex items-center gap-1">
@@ -997,14 +1003,23 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
 
         <button
           onClick={handlePlayStop}
-          class="w-16 h-16 flex items-center justify-center rounded-full bg-white"
+          disabled={getContentDuration() === 0 && !isPlaying()}
+          class={`w-16 h-16 flex items-center justify-center rounded-full ${
+            getContentDuration() === 0 && !isPlaying()
+              ? "bg-neutral-600 cursor-not-allowed"
+              : "bg-white"
+          }`}
         >
           {isPlaying() ? (
             <svg class="w-8 h-8 text-black" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="1" />
             </svg>
           ) : (
-            <svg class="w-8 h-8 text-black ml-1" fill="currentColor" viewBox="0 0 24 24">
+            <svg
+              class={`w-8 h-8 ml-1 ${getContentDuration() === 0 ? "text-neutral-400" : "text-black"}`}
+              fill="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path d="M8 5.14v14l11-7-11-7z" />
             </svg>
           )}
