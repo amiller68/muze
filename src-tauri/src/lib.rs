@@ -1,5 +1,6 @@
 mod audio;
 mod commands;
+mod dropbox;
 mod project;
 mod vault;
 
@@ -69,6 +70,17 @@ pub fn run() {
             vault::delete_vault,
             vault::set_active_vault,
             vault::get_active_vault_path,
+            // Dropbox
+            dropbox::dropbox_get_auth_url,
+            dropbox::dropbox_exchange_code,
+            dropbox::dropbox_is_connected,
+            dropbox::dropbox_disconnect,
+            dropbox::dropbox_list_folder,
+            dropbox::dropbox_download_file,
+            dropbox::dropbox_upload_file,
+            dropbox::dropbox_create_folder,
+            dropbox::dropbox_get_sync_status,
+            dropbox::dropbox_content_hash,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

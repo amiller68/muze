@@ -1,8 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-shell";
 import { type Component, createSignal, For, onMount, Show } from "solid-js";
+import { DropboxFolderPicker } from "./components/DropboxFolderPicker";
 import { EmptyState } from "./components/editor/EmptyState";
 import { MixEditor } from "./components/editor/MixEditor";
 import { Sidebar } from "./components/sidebar";
+import { useDropboxStore } from "./stores/dropboxStore";
 import { useMixStore } from "./stores/mixStore";
 import { useVaultStore } from "./stores/vaultStore";
 import type { Mix, Track } from "./types/mix";
@@ -19,6 +22,7 @@ type ViewMode = "browser" | "editor";
 const App: Component = () => {
   const store = useMixStore();
   const vaultStore = useVaultStore();
+  const dropboxStore = useDropboxStore();
   const [view, setView] = createSignal<ViewMode>("browser");
   const [currentPath, setCurrentPath] = createSignal<string>("");
   const [pathStack, setPathStack] = createSignal<string[]>([]);
@@ -31,6 +35,11 @@ const App: Component = () => {
   const [showSearch, setShowSearch] = createSignal(false);
   const [isDeleting, setIsDeleting] = createSignal(false);
   const [showVaultPicker, setShowVaultPicker] = createSignal(false);
+
+  // Dropbox integration state
+  const [showAddVault, setShowAddVault] = createSignal(false);
+  const [showDropboxFolderPicker, setShowDropboxFolderPicker] = createSignal(false);
+  const [newVaultName, setNewVaultName] = createSignal("");
 
   // Desktop file tree state
   const [expandedPaths, setExpandedPaths] = createSignal<Set<string>>(new Set());
@@ -444,6 +453,39 @@ const App: Component = () => {
       await refreshEntries(path);
     }
     setShowVaultPicker(false);
+  };
+
+  // Start Dropbox OAuth flow
+  const handleConnectDropbox = async () => {
+    try {
+      const authUrl = await dropboxStore.startAuth();
+      // Open in system browser for OAuth
+      await open(authUrl);
+      // Note: The OAuth redirect will need to be handled via deep link
+      // For now, we'll show a manual code entry dialog or handle via deep link plugin
+    } catch (e) {
+      console.error("Failed to start Dropbox auth:", e);
+    }
+  };
+
+  // Handle Dropbox folder selection (after OAuth complete)
+  const handleDropboxFolderSelect = async (folderPath: string) => {
+    try {
+      const name = newVaultName() || "Dropbox";
+      await vaultStore.createVault(name, "dropbox", folderPath);
+      await vaultStore.loadVaults();
+      setShowDropboxFolderPicker(false);
+      setShowAddVault(false);
+      setNewVaultName("");
+    } catch (e) {
+      console.error("Failed to create Dropbox vault:", e);
+    }
+  };
+
+  // Cancel Dropbox folder picker
+  const handleDropboxFolderCancel = () => {
+    setShowDropboxFolderPicker(false);
+    dropboxStore.cancelAuth();
   };
 
   // Delete selected items (desktop)
@@ -1485,14 +1527,131 @@ const App: Component = () => {
                 )}
               </For>
             </div>
+            <div class="flex gap-2 mt-4">
+              <button
+                onClick={() => {
+                  setShowVaultPicker(false);
+                  setShowAddVault(true);
+                }}
+                class="flex-1 py-3 rounded-xl bg-blue-600 text-white hover:bg-blue-500"
+              >
+                Add Vault
+              </button>
+              <button
+                onClick={() => setShowVaultPicker(false)}
+                class="flex-1 py-3 rounded-xl bg-neutral-800 text-neutral-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      </Show>
+
+      {/* Add Vault Modal */}
+      <Show when={showAddVault()}>
+        <div class="fixed inset-0 bg-black/80 z-50 flex items-end justify-center">
+          <div class="bg-neutral-900 rounded-t-2xl w-full max-w-md p-5 pb-8">
+            <div class="w-12 h-1 bg-neutral-700 rounded-full mx-auto mb-4" />
+            <h2 class="text-lg font-semibold mb-4 text-center">Add Vault</h2>
+
+            {/* Vault name input */}
+            <input
+              type="text"
+              placeholder="Vault name (optional)"
+              value={newVaultName()}
+              onInput={(e) => setNewVaultName(e.currentTarget.value)}
+              class="w-full px-4 py-3 rounded-xl bg-neutral-800 text-white placeholder-neutral-500 mb-4"
+            />
+
+            {/* Provider options */}
+            <div class="space-y-2">
+              {/* Dropbox option */}
+              <button
+                onClick={async () => {
+                  const connected = await dropboxStore.checkConnection();
+                  if (connected) {
+                    setShowDropboxFolderPicker(true);
+                  } else {
+                    await handleConnectDropbox();
+                  }
+                }}
+                class="w-full p-4 rounded-xl bg-neutral-800 text-left flex items-center gap-4 hover:bg-neutral-700"
+              >
+                <div class="w-10 h-10 rounded-lg bg-blue-600 flex items-center justify-center">
+                  <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M12 6.134L6 10.5l6 4.366L6 19.232l-6-4.366L6 10.5 0 6.134l6-4.366 6 4.366zm0 0l6-4.366 6 4.366-6 4.366 6 4.366-6 4.366-6-4.366 6-4.366-6-4.366z" />
+                  </svg>
+                </div>
+                <div class="flex-1">
+                  <div class="font-medium text-neutral-200">Connect Dropbox</div>
+                  <div class="text-xs text-neutral-500">
+                    {dropboxStore.isConnected() ? "Connected - Select folder" : "Sign in to sync"}
+                  </div>
+                </div>
+                <Show when={dropboxStore.isConnected()}>
+                  <svg
+                    class="w-5 h-5 text-green-500"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M5 13l4 4L19 7"
+                    />
+                  </svg>
+                </Show>
+              </button>
+
+              {/* iCloud option (placeholder) */}
+              <button
+                class="w-full p-4 rounded-xl bg-neutral-800 text-left flex items-center gap-4 opacity-50 cursor-not-allowed"
+                disabled
+              >
+                <div class="w-10 h-10 rounded-lg bg-neutral-600 flex items-center justify-center">
+                  <svg
+                    class="w-5 h-5 text-neutral-300"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"
+                    />
+                  </svg>
+                </div>
+                <div class="flex-1">
+                  <div class="font-medium text-neutral-400">iCloud</div>
+                  <div class="text-xs text-neutral-600">Coming soon</div>
+                </div>
+              </button>
+            </div>
+
             <button
-              onClick={() => setShowVaultPicker(false)}
+              onClick={() => {
+                setShowAddVault(false);
+                setNewVaultName("");
+              }}
               class="w-full mt-4 py-3 rounded-xl bg-neutral-800 text-neutral-300"
             >
               Cancel
             </button>
           </div>
         </div>
+      </Show>
+
+      {/* Dropbox Folder Picker */}
+      <Show when={showDropboxFolderPicker()}>
+        <DropboxFolderPicker
+          onSelect={handleDropboxFolderSelect}
+          onCancel={handleDropboxFolderCancel}
+        />
       </Show>
     </div>
   );
