@@ -310,6 +310,8 @@ const App: Component = () => {
         }
       } else if (type === "mix") {
         await store.createMix(name, targetPath);
+        // Refresh entries so new mix appears in sidebar
+        await refreshEntries(currentPath());
         if (isMobile()) {
           setView("editor");
         } else {
@@ -319,7 +321,7 @@ const App: Component = () => {
             setSelectedPaths(new Set([mixPath]));
             setLastSelectedPath(mixPath);
           }
-          // Refresh target folder if it's loaded
+          // Refresh target folder if it's loaded (when creating in a subfolder)
           if (targetPath !== currentPath() && childrenMap().has(targetPath)) {
             const items = await invoke<FolderEntry[]>("list_entries", { path: targetPath });
             const newMap = new Map(childrenMap());

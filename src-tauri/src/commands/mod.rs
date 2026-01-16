@@ -336,3 +336,55 @@ pub fn export_and_share(
     // Then open share sheet
     crate::audio::share_file(&output_path)
 }
+
+/// Generate waveform data from an audio file
+/// Returns amplitude values (0-1) at ~20 samples per second
+#[tauri::command]
+pub fn get_waveform(audio_path: String) -> Result<Vec<f32>, String> {
+    use hound::WavReader;
+
+    let reader = WavReader::open(&audio_path)
+        .map_err(|e| format!("Failed to open {}: {}", audio_path, e))?;
+    let spec = reader.spec();
+    let channels = spec.channels as usize;
+    let sample_rate = spec.sample_rate;
+
+    // Read all samples
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .into_samples::<f32>()
+            .filter_map(|s| s.ok())
+            .collect(),
+        hound::SampleFormat::Int => {
+            let bits = spec.bits_per_sample;
+            let max_val = (1 << (bits - 1)) as f32;
+            reader
+                .into_samples::<i32>()
+                .filter_map(|s| s.ok())
+                .map(|s| (s as f32 / max_val).abs())
+                .collect()
+        }
+    };
+
+    // Convert to mono and take absolute value for amplitude
+    let mono: Vec<f32> = if channels == 2 {
+        samples
+            .chunks(2)
+            .map(|chunk| ((chunk[0].abs() + chunk.get(1).map(|s| s.abs()).unwrap_or(0.0)) * 0.5))
+            .collect()
+    } else {
+        samples.iter().map(|s| s.abs()).collect()
+    };
+
+    // Downsample to ~20 samples per second (one per 50ms, matching LEVEL_POLL_MS)
+    let samples_per_bar = (sample_rate as usize) / 20; // ~2400 samples per bar at 48kHz
+    let mut waveform = Vec::new();
+
+    for chunk in mono.chunks(samples_per_bar) {
+        // Take max amplitude in each chunk for peak visualization
+        let peak = chunk.iter().cloned().fold(0.0f32, f32::max);
+        waveform.push(peak);
+    }
+
+    Ok(waveform)
+}
