@@ -22,11 +22,13 @@ export interface Track {
 export interface Clip {
   id: string;
   audio_file: string;
+  position_ms: number; // Start position in timeline
   original_duration_ms: number;
   trim_start_ms: number;
   trim_end_ms: number;
   loop_enabled: boolean;
   cuts: CutRegion[];
+  waveform?: number[];
 }
 
 export interface CutRegion {

@@ -62,6 +62,7 @@ pub fn run() {
             commands::trim_audio,
             commands::export_mix_to_file,
             commands::export_and_share,
+            commands::get_waveform,
             // Vault
             vault::load_vault_registry,
             vault::save_vault_registry,

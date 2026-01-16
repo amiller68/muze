@@ -30,15 +30,24 @@ const autoSave = () => {
 
 export function useMixStore() {
   const createMix = async (name: string, parentPath: string) => {
+    // Stop any current playback and clear audio engine
+    await invoke("pause").catch(() => {});
+    await invoke("seek", { positionMs: 0 }).catch(() => {});
+
     const mix = await invoke<Mix>("create_project", {
       name,
       parentPath,
     });
     const safeName = name.replace(/[^a-zA-Z0-9 \-_]/g, "_");
+    const path = `${parentPath}/${safeName}`;
     setCurrentMix(mix);
-    setMixPath(`${parentPath}/${safeName}`);
+    setMixPath(path);
     setIsDirty(false);
     setSelectedTrack(0);
+
+    // Clear audio engine - load empty track list
+    await loadTracksIntoEngine(mix, path);
+
     return mix;
   };
 
@@ -119,7 +128,12 @@ export function useMixStore() {
     autoSave();
   };
 
-  const addClipToTrack = async (trackIndex: number, audioFile: string, durationMs: number) => {
+  const addClipToTrack = async (
+    trackIndex: number,
+    audioFile: string,
+    durationMs: number,
+    positionMs = 0,
+  ) => {
     const mix = currentMix();
     const path = mixPath();
     if (!mix || !path) return;
@@ -127,6 +141,7 @@ export function useMixStore() {
     const clip: Clip = {
       id: crypto.randomUUID(),
       audio_file: audioFile,
+      position_ms: positionMs,
       original_duration_ms: durationMs,
       trim_start_ms: 0,
       trim_end_ms: durationMs,
