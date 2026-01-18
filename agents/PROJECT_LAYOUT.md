@@ -1,12 +1,18 @@
 # Project Layout
 
+> **See also:** [INDEX.md](./INDEX.md) for documentation navigation, [ARCHITECTURE.md](./ARCHITECTURE.md) for technical details
+
 ## Root Structure
 
 ```
 muse/
 ├── src/                    # SolidJS frontend
 ├── src-tauri/              # Rust backend
-├── agents/                 # This documentation
+├── agents/                 # Agent and developer documentation
+├── issues/                 # Issue tracking (epics and tickets)
+├── .claude/                # Claude Code configuration
+│   ├── settings.json       # Permissions and environment
+│   └── commands/           # Slash commands (/check, /draft, /review)
 ├── .github/workflows/      # CI configuration
 ├── Makefile                # Build commands
 ├── package.json            # Frontend dependencies
@@ -157,3 +163,11 @@ MyCollection/
 | `vitest.config.ts` | Frontend test configuration |
 | `tailwind.config.js` | CSS utility classes |
 | `tauri.conf.json` | App ID, permissions, build settings |
+
+---
+
+## See Also
+
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical implementation details
+- [CONCEPTS.md](./CONCEPTS.md) - High-level domain model
+- [INDEX.md](./INDEX.md) - Documentation navigation

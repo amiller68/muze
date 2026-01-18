@@ -1,5 +1,15 @@
 # Success Criteria
 
+> **See also:** [CONTRIBUTING.md](./CONTRIBUTING.md) for code standards, [INDEX.md](./INDEX.md) for documentation navigation
+
+## Golden Rule
+
+**You are not allowed to finish in a state where `make check` is failing.**
+
+This is the single most important rule. All lint, format, and test checks must pass before considering any work complete.
+
+---
+
 ## Definition of Done
 
 A change is complete when:
@@ -147,3 +157,11 @@ GitHub Actions runs on every push/PR:
 4. **Build**: Full build (only if tests pass)
 
 All jobs must pass for merge.
+
+---
+
+## See Also
+
+- [CONTRIBUTING.md](./CONTRIBUTING.md) - Code standards and PR process
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical patterns
+- [INDEX.md](./INDEX.md) - Documentation navigation
