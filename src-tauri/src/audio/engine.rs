@@ -13,6 +13,7 @@ pub struct LoadedTrack {
     pub sample_rate: u32,
     pub volume: f32,
     pub muted: bool,
+    pub position_samples: usize, // Timeline offset in samples
 }
 
 /// Shared track data for playback
@@ -41,6 +42,7 @@ pub struct TrackInfo {
     pub audio_path: String,
     pub volume: f32,
     pub muted: bool,
+    pub position_ms: f64,
 }
 
 /// Commands that can be sent to the audio thread
@@ -408,8 +410,11 @@ fn run_audio_thread(
                         let mut mixed_sample: f32 = 0.0;
 
                         for track in &track_data.tracks {
-                            if !track.muted && sample_idx < track.samples.len() {
-                                mixed_sample += track.samples[sample_idx] * track.volume;
+                            if !track.muted && sample_idx >= track.position_samples {
+                                let track_sample_idx = sample_idx - track.position_samples;
+                                if track_sample_idx < track.samples.len() {
+                                    mixed_sample += track.samples[track_sample_idx] * track.volume;
+                                }
                             }
                         }
 
@@ -481,6 +486,7 @@ fn run_audio_thread(
                                 sample_rate,
                                 volume: info.volume,
                                 muted: info.muted,
+                                position_samples: ((info.position_ms / 1000.0) * sample_rate as f64) as usize,
                             });
                         }
                         Err(e) => {

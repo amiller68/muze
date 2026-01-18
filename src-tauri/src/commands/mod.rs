@@ -263,6 +263,7 @@ pub fn load_tracks(
                 audio_path: format!("{}/{}", project_path, audio_file),
                 volume: t.volume,
                 muted: t.muted,
+                position_ms: t.position_ms,
             })
         })
         .collect();
@@ -275,6 +276,7 @@ pub struct TrackLoadInfo {
     pub audio_file: Option<String>,
     pub volume: f32,
     pub muted: bool,
+    pub position_ms: f64,
 }
 
 // ============= Audio Editing Commands =============
