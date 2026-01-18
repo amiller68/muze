@@ -73,6 +73,7 @@ export function useMixStore() {
       audio_file: t.clip?.audio_file || null,
       volume: t.volume,
       muted: t.muted,
+      position_ms: t.clip?.position_ms || 0,
     }));
     await invoke("load_tracks", { projectPath: path, tracks }).catch(() => {});
   };

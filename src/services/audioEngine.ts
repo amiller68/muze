@@ -4,6 +4,7 @@ export interface TrackInfo {
   audio_file: string | null;
   volume: number;
   muted: boolean;
+  position_ms: number;
 }
 
 // Transport controls
