@@ -275,14 +275,22 @@ fn load_wav_file(path: &str, target_sample_rate: u32) -> Result<Vec<f32>, String
         samples
     };
 
-    // Simple linear resampling if needed
+    // Linear interpolation resampling if needed
     if source_rate != target_sample_rate {
         let ratio = source_rate as f64 / target_sample_rate as f64;
         let new_len = (mono.len() as f64 / ratio) as usize;
         let mut resampled = Vec::with_capacity(new_len);
         for i in 0..new_len {
-            let src_idx = (i as f64 * ratio) as usize;
-            resampled.push(mono.get(src_idx).copied().unwrap_or(0.0));
+            let src_pos = i as f64 * ratio;
+            let src_idx = src_pos as usize;
+            let frac = src_pos - src_idx as f64;
+
+            // Linear interpolation between adjacent samples
+            let sample0 = mono.get(src_idx).copied().unwrap_or(0.0);
+            let sample1 = mono.get(src_idx + 1).copied().unwrap_or(sample0);
+            let interpolated = sample0 + (sample1 - sample0) * frac as f32;
+
+            resampled.push(interpolated);
         }
         Ok(resampled)
     } else {
@@ -328,7 +336,8 @@ fn run_audio_thread(
     let input_channels = input_config.channels() as usize;
     let input_sample_rate = input_config.sample_rate().0;
 
-    // Create recorder (will be started/stopped via commands)
+    // Create recorder at input device's sample rate
+    // Resampling happens when loading tracks for playback
     let recorder = Arc::new(std::sync::Mutex::new(Recorder::new(input_sample_rate, 1))); // Mono recording
 
     // Clone for input callback

@@ -19,7 +19,9 @@ import {
   ZOOM_MIN,
 } from "../../constants/config";
 import { useMixStore } from "../../stores/mixStore";
+import type { Clip } from "../../types/mix";
 import { TrackSettingsModal } from "./TrackSettingsModal";
+import { BAR_UNIT_PX, Waveform } from "./Waveform";
 
 interface MixEditorProps {
   onDone: () => void;
@@ -45,6 +47,13 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
   const [trimStart, setTrimStart] = createSignal(0);
   const [trimEnd, setTrimEnd] = createSignal(0);
   const [draggingHandle, setDraggingHandle] = createSignal<"start" | "end" | null>(null);
+  // Cache for waveform data loaded from audio files
+  const [waveformCache, setWaveformCache] = createSignal<Map<string, number[]>>(new Map());
+  // Track scroll position for timeline markers
+  const [scrollLeft, setScrollLeft] = createSignal(0);
+  const [viewportWidth, setViewportWidth] = createSignal(0);
+  // Version counter to invalidate stale position updates from async polling
+  const [positionVersion, setPositionVersion] = createSignal(0);
 
   let waveformRef: HTMLDivElement | undefined;
   let positionInterval: number | undefined;
@@ -76,8 +85,15 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     }
 
     positionInterval = window.setInterval(async () => {
+      // Only poll position when playing or recording
+      if (!isPlaying() && !isRecording()) return;
+
+      // Capture version before async call to detect stale responses
+      const version = positionVersion();
       try {
         const pos = await invoke<number>("get_position");
+        // Only update if version hasn't changed (no stop/seek operation occurred)
+        if (positionVersion() !== version) return;
         setPlayheadMs(pos);
         // Stop playback when reaching end of content
         const contentDuration = getContentDuration();
@@ -95,7 +111,7 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         setInputLevel(level);
         // Add to recording waveform when recording
         if (isRecording()) {
-          setRecordingWaveform((prev) => [...prev.slice(-200), level]);
+          setRecordingWaveform((prev) => [...prev, level]);
         }
       } catch (_e) {}
     }, LEVEL_POLL_MS);
@@ -106,20 +122,46 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     if (levelInterval) clearInterval(levelInterval);
   });
 
+  // Auto-scroll to follow playhead during recording/playback
+  createEffect(() => {
+    if (!waveformRef) return;
+    const playhead = playheadMs();
+    const playing = isPlaying();
+    const recording = isRecording();
+
+    if (playing || recording) {
+      const playheadPx = msToPixels(playhead);
+      const viewportWidth = waveformRef.clientWidth;
+      // Keep playhead at 75% of viewport (near right edge, leaving room for incoming audio)
+      const targetScroll = playheadPx - viewportWidth * 0.75;
+      waveformRef.scrollLeft = Math.max(0, targetScroll);
+    }
+  });
+
   const getContentDuration = () => {
     const mix = store.currentMix();
     if (!mix) return 0;
     let max = 0;
     for (const track of mix.tracks) {
       if (track.clip) {
-        max = Math.max(max, track.clip.original_duration_ms);
+        // Account for clip position + duration
+        const clipEnd = (track.clip.position_ms || 0) + track.clip.original_duration_ms;
+        max = Math.max(max, clipEnd);
       }
+    }
+    // Include recording in progress
+    if (isRecording()) {
+      const recordingEnd = recordingStartMs() + recordingWaveform().length * LEVEL_POLL_MS;
+      max = Math.max(max, recordingEnd);
     }
     return max;
   };
 
+  // Timeline scale is the duration represented by the full timeline
+  // Always use at least MIN_TIMELINE_MS to prevent jitter during early recording
   const getTimelineScale = () => {
-    const base = Math.max(getContentDuration(), MIN_TIMELINE_MS);
+    const content = getContentDuration();
+    const base = Math.max(content, MIN_TIMELINE_MS);
     return base / zoomLevel();
   };
 
@@ -188,16 +230,13 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     return `${m}:${(s % 60).toString().padStart(2, "0")}`;
   };
 
-  const playheadPercent = () => {
-    const scale = getTimelineScale();
-    return scale > 0 ? (playheadMs() / scale) * 100 : 0;
-  };
-
   const handleSeek = async (e: MouseEvent) => {
     if (!waveformRef) return;
     const rect = waveformRef.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const normalized = x / rect.width;
+    const scrollOffset = waveformRef.scrollLeft;
+    const x = e.clientX - rect.left + scrollOffset;
+    const totalWidth = getTimelineWidthPx();
+    const normalized = x / totalWidth;
     const positionMs = Math.floor(normalized * getTimelineScale());
     await invoke("seek", { positionMs }).catch(() => {});
     setPlayheadMs(positionMs);
@@ -207,9 +246,10 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     if (isPlaying()) {
       if (isRecording()) {
         await handleStopRecording();
+      } else {
+        await invoke("pause").catch(() => {});
+        setIsPlaying(false);
       }
-      await invoke("pause").catch(() => {});
-      setIsPlaying(false);
     } else {
       // If at or past the end of content, seek to beginning first
       const contentDuration = getContentDuration();
@@ -237,8 +277,6 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
     try {
       if (isRecording()) {
         await handleStopRecording();
-        await invoke("pause");
-        setIsPlaying(false);
       } else {
         // Add track if none exist
         if (mix.tracks.length === 0) {
@@ -249,11 +287,8 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         const trackIndex = store.selectedTrack();
         const track = mix.tracks[trackIndex];
 
-        // Clear recording waveform and save start position
+        // Clear recording waveform
         setRecordingWaveform([]);
-        // Get position directly from engine to avoid any signal sync issues
-        const currentPlayhead = await invoke<number>("get_position");
-        setRecordingStartMs(currentPlayhead);
 
         // If track has existing clip, save its path for splice operation
         if (track?.clip) {
@@ -262,8 +297,6 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           // Mute the track so we don't hear old audio while recording
           store.updateTrackMute(trackIndex, true);
           await store.reloadTracks();
-          // Seek back to captured position after reload
-          await invoke("seek", { positionMs: currentPlayhead });
         } else {
           setExistingClipPath(null);
         }
@@ -277,6 +310,10 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         setIsRecording(true);
         setIsPlaying(true);
         await invoke("play");
+
+        // Capture position AFTER playback starts to avoid latency offset
+        const currentPlayhead = await invoke<number>("get_position");
+        setRecordingStartMs(currentPlayhead);
       }
     } catch (e) {
       setAudioError(`Recording failed: ${e}`);
@@ -285,7 +322,13 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
 
   const handleStopRecording = async () => {
     try {
+      // Increment version FIRST to invalidate any in-flight position polling responses
+      setPositionVersion((v) => v + 1);
+
       await invoke("stop_recording");
+      // Pause playback to stop position polling from overwriting our playhead
+      await invoke("pause").catch(() => {});
+      setIsPlaying(false);
       setIsRecording(false);
 
       const filename = recordingFilename();
@@ -293,7 +336,14 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
       const path = store.mixPath();
       const startMs = recordingStartMs();
       const existingPath = existingClipPath();
-      const recordingDuration = playheadMs() - startMs;
+      // Capture waveform data before clearing
+      const waveformData = recordingWaveform();
+      // Calculate duration from samples (more accurate than playhead which may drift)
+      const recordingDuration = waveformData.length * 50; // 50ms per sample
+      // Set playhead to end of recording
+      const endPosition = startMs + recordingDuration;
+      await invoke("seek", { positionMs: endPosition }).catch(() => {});
+      setPlayheadMs(endPosition);
 
       if (filename && recordingDuration > 0 && path) {
         const newRecordingPath = `${path}/audio/${filename}`;
@@ -317,34 +367,118 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           await store.updateClipDuration(trackIndex, newDuration);
           await store.saveMix();
 
+          // Invalidate waveform cache - audio file was modified
+          setWaveformCache((prev) => {
+            const next = new Map(prev);
+            next.delete(existingPath);
+            return next;
+          });
+
           // Reload the audio into the engine so it plays the new spliced audio
           await store.reloadTracks();
         } else {
-          // NEW recording: Add as new clip
-          await store.addClipToTrack(trackIndex, `audio/${filename}`, recordingDuration);
+          // NEW recording: Add as new clip at the position where recording started
+          await store.addClipToTrack(
+            trackIndex,
+            `audio/${filename}`,
+            recordingDuration,
+            startMs, // Position in timeline where recording started
+          );
           await store.saveMix();
         }
       }
 
       setRecordingFilename(null);
       setExistingClipPath(null);
+      setRecordingWaveform([]);
     } catch (e) {
       alert(`Stop recording failed: ${e}`);
     }
   };
 
-  const generateWaveform = (seed: string | undefined, count: number): number[] => {
-    const bars: number[] = [];
-    let s = 0;
-    const seedStr = seed || "default";
-    for (let i = 0; i < seedStr.length; i++) s += seedStr.charCodeAt(i);
-    for (let i = 0; i < count; i++) {
-      s = (s * 1103515245 + 12345) & 0x7fffffff;
-      const r = (s % 1000) / 1000;
-      const env = Math.sin((i / count) * Math.PI) * 0.3 + 0.3;
-      bars.push(Math.min(1, env + r * 0.6));
+  // Load waveform from audio file via backend
+  const loadWaveform = async (audioPath: string, forceReload = false) => {
+    const cache = waveformCache();
+    if (!forceReload && cache.has(audioPath)) return;
+
+    try {
+      const waveform = await invoke<number[]>("get_waveform", { audioPath });
+      setWaveformCache((prev) => {
+        const next = new Map(prev);
+        next.set(audioPath, waveform);
+        return next;
+      });
+    } catch (e) {
+      console.error(`Failed to load waveform for ${audioPath}:`, e);
     }
-    return bars;
+  };
+
+  // Invalidate waveform cache for a specific audio file (call after modifying audio)
+  const invalidateWaveform = (audioPath: string) => {
+    setWaveformCache((prev) => {
+      const next = new Map(prev);
+      next.delete(audioPath);
+      return next;
+    });
+    // Reload the waveform from the modified file
+    loadWaveform(audioPath, true);
+  };
+
+  // Load waveforms when mix/tracks change
+  createEffect(() => {
+    const mix = store.currentMix();
+    const path = store.mixPath();
+    if (!mix || !path) return;
+
+    for (const track of mix.tracks) {
+      if (track.clip) {
+        const audioPath = `${path}/${track.clip.audio_file}`;
+        loadWaveform(audioPath);
+      }
+    }
+  });
+
+  // Get samples for a clip from cache (returns empty if not loaded yet)
+  const getClipSamples = (clip: Clip): number[] => {
+    const path = store.mixPath();
+    if (!path) return [];
+    const audioPath = `${path}/${clip.audio_file}`;
+    return waveformCache().get(audioPath) || [];
+  };
+
+  // Single source of truth for waveform bar count calculation
+  // 20 bars per second (matches LEVEL_POLL_MS = 50ms), minimum 20 bars
+  const getBarCount = (durationMs: number) => Math.max(20, Math.floor(durationMs / 50));
+
+  // Convert duration to pixel width (bar count * pixels per bar)
+  const getWidthPx = (durationMs: number) => getBarCount(durationMs) * BAR_UNIT_PX;
+
+  // Get total timeline width in pixels
+  // Always uses pixel-based calculation to match waveform bar widths
+  const getTimelineWidthPx = () => {
+    const vw = viewportWidth();
+    // Calculate width from timeline scale using same formula as waveforms
+    const contentWidth = getWidthPx(getTimelineScale());
+    // Use at least viewport width so short content fills the space
+    return vw > 0 ? Math.max(contentWidth, vw) : contentWidth;
+  };
+
+  // Convert ms position to pixel position
+  const msToPixels = (ms: number) => (ms / getTimelineScale()) * getTimelineWidthPx();
+
+  // Compute visible time range for timeline markers (reactive)
+  const getVisibleTimeMarkers = () => {
+    const totalWidth = getTimelineWidthPx();
+    const visibleStartPx = scrollLeft();
+    const visibleWidthPx = viewportWidth() || totalWidth;
+    const scale = getTimelineScale();
+
+    // Convert pixel positions to ms
+    const startMs = totalWidth > 0 ? (visibleStartPx / totalWidth) * scale : 0;
+    const visibleDurationMs = totalWidth > 0 ? (visibleWidthPx / totalWidth) * scale : scale;
+
+    // Return 5 evenly spaced timestamps
+    return [0, 0.25, 0.5, 0.75, 1].map((pct) => startMs + pct * visibleDurationMs);
   };
 
   // Auto-stop playback when reaching end of content
@@ -425,6 +559,8 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         outputPath: audioPath,
       });
       store.updateClipDuration(store.selectedTrack(), newDuration);
+      // Invalidate waveform cache - audio file was modified
+      invalidateWaveform(audioPath);
       await store.reloadTracks();
       setTrimMode(false);
       setTrimStart(0);
@@ -465,6 +601,8 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
       } else {
         store.updateClipDuration(store.selectedTrack(), trimEnd() - trimStart());
       }
+      // Invalidate waveform cache - audio file was modified
+      invalidateWaveform(audioPath);
       await store.reloadTracks();
       setTrimMode(false);
       setTrimStart(0);
@@ -583,12 +721,21 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
         </div>
       </Show>
 
-      {/* Waveform Area */}
+      {/* Waveform Area - scrollable container */}
       <div
-        ref={waveformRef}
-        class="flex-1 relative bg-neutral-900 cursor-pointer min-h-[200px]"
+        ref={(el) => {
+          waveformRef = el;
+          // Initialize viewport width
+          if (el) setViewportWidth(el.clientWidth);
+        }}
+        class="flex-1 relative bg-neutral-900 cursor-pointer min-h-[200px] overflow-x-auto overflow-y-hidden"
         onClick={trimMode() ? undefined : handleSeek}
         onWheel={trimMode() ? undefined : handleWheel}
+        onScroll={(e) => {
+          const target = e.currentTarget;
+          setScrollLeft(target.scrollLeft);
+          setViewportWidth(target.clientWidth);
+        }}
         onTouchStart={trimMode() ? undefined : handleTouchStart}
         onTouchMove={(e) => {
           if (trimMode()) handleTrimDragMove(e);
@@ -609,36 +756,20 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
             if (!track?.clip) return null;
             const clip = track.clip;
             const duration = clip.original_duration_ms;
-            const durationSec = duration / 1000;
-            const barCount = Math.max(50, Math.min(300, Math.floor(durationSec * 15)));
-            const bars = generateWaveform(clip.id, barCount);
+            const samples = getClipSamples(clip);
             const startPct = (trimStart() / duration) * 100;
             const endPct = (trimEnd() / duration) * 100;
 
             return (
               <>
                 {/* Full-width waveform - white bars */}
-                <div class="absolute inset-0">
-                  <svg class="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                    <For each={bars}>
-                      {(height, idx) => {
-                        const barHeight = Math.max(height * 40, 2);
-                        const x = (idx() / bars.length) * 100;
-                        const barW = (100 / bars.length) * 0.7;
-                        return (
-                          <rect
-                            x={x}
-                            y={50 - barHeight}
-                            width={barW}
-                            height={barHeight * 2}
-                            rx="0.5"
-                            fill="#ffffff"
-                            opacity={0.7}
-                          />
-                        );
-                      }}
-                    </For>
-                  </svg>
+                <div class="absolute inset-0 flex items-center">
+                  <Waveform
+                    samples={samples}
+                    barCount={getBarCount(duration)}
+                    color="#ffffff"
+                    opacity={0.7}
+                  />
                 </div>
 
                 {/* Yellow/gold selection overlay */}
@@ -719,263 +850,209 @@ export const MixEditor: Component<MixEditorProps> = (props) => {
           })()}
         </Show>
 
-        {/* NORMAL MODE */}
+        {/* NORMAL MODE - inner container with pixel width for scrolling */}
         <Show when={!trimMode()}>
-          <Show
-            when={store.currentMix()?.tracks.some((t) => t.clip)}
-            fallback={
-              <div class="absolute inset-0 flex items-center justify-center">
-                <span class="text-neutral-600">Tap record to start</span>
-                <span class="text-neutral-700 text-xs ml-2">
-                  (tracks: {store.currentMix()?.tracks.length || 0})
-                </span>
-              </div>
-            }
+          <div
+            class="relative h-full"
+            style={{ width: `${getTimelineWidthPx()}px`, "min-width": "100%" }}
           >
-            {/* Single mode - only selected track */}
-            <Show when={viewMode() === "single" && !isRecording()}>
-              {(() => {
-                const track = store.currentMix()?.tracks[store.selectedTrack()];
-                if (!track?.clip) return null;
-                const clip = track.clip;
-                const durationSec = clip.original_duration_ms / 1000;
-                const barCount = Math.max(20, Math.min(200, Math.floor(durationSec * 10)));
-                const bars = generateWaveform(clip.id, barCount);
-                const clipWidth = (clip.original_duration_ms / getTimelineScale()) * 100;
-                return (
-                  <div
-                    class="absolute top-0 bottom-0 left-0"
-                    style={{ width: `${Math.max(clipWidth, 5)}%`, opacity: track.muted ? 0.3 : 1 }}
-                  >
-                    <svg class="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                      <For each={bars}>
-                        {(height, idx) => {
-                          const barHeight = Math.max(height * 40, 2);
-                          const x = (idx() / bars.length) * 100;
-                          const barW = (100 / bars.length) * 0.6;
-                          return (
-                            <rect
-                              x={x}
-                              y={50 - barHeight}
-                              width={barW}
-                              height={barHeight * 2}
-                              rx="0.5"
-                              fill={track.color}
-                            />
-                          );
-                        }}
-                      </For>
-                    </svg>
-                  </div>
-                );
-              })()}
-            </Show>
-
-            {/* Overlay mode - all tracks overlaid, selected dominant */}
-            <Show when={viewMode() === "overlay"}>
-              <For each={store.currentMix()?.tracks}>
-                {(track, i) => {
-                  // Hide the selected track's clip waveform while recording (we show live waveform instead)
-                  const isSelectedAndRecording = () =>
-                    i() === store.selectedTrack() && isRecording();
-                  if (!track.clip || isSelectedAndRecording()) return null;
+            <Show
+              when={store.currentMix()?.tracks.some((t) => t.clip) || isRecording()}
+              fallback={
+                <div class="absolute inset-0 flex items-center justify-center">
+                  <span class="text-neutral-600">Tap record to start</span>
+                  <span class="text-neutral-700 text-xs ml-2">
+                    (tracks: {store.currentMix()?.tracks.length || 0})
+                  </span>
+                </div>
+              }
+            >
+              {/* Single mode - only selected track */}
+              <Show when={viewMode() === "single" && !isRecording()}>
+                {(() => {
+                  const track = store.currentMix()?.tracks[store.selectedTrack()];
+                  if (!track?.clip) return null;
                   const clip = track.clip;
-                  const isSelected = i() === store.selectedTrack();
-                  const durationSec = clip.original_duration_ms / 1000;
-                  const barCount = Math.max(20, Math.min(200, Math.floor(durationSec * 10)));
-                  const bars = generateWaveform(clip.id, barCount);
-                  const clipWidth = (clip.original_duration_ms / getTimelineScale()) * 100;
+                  const durationMs = clip.original_duration_ms;
+                  const positionPx = msToPixels(clip.position_ms || 0);
                   return (
                     <div
-                      class="absolute top-0 bottom-0 left-0"
-                      style={{
-                        width: `${Math.max(clipWidth, 5)}%`,
-                        opacity: track.muted ? 0.15 : isSelected ? 0.9 : 0.4,
-                        "z-index": isSelected ? 5 : 1,
-                      }}
+                      class="absolute top-0 bottom-0 flex items-center"
+                      style={{ left: `${positionPx}px`, opacity: track.muted ? 0.3 : 1 }}
                     >
-                      <svg class="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                        <For each={bars}>
-                          {(height, idx) => {
-                            const barHeight = Math.max(height * 40, 2);
-                            const x = (idx() / bars.length) * 100;
-                            const barW = (100 / bars.length) * 0.6;
-                            return (
-                              <rect
-                                x={x}
-                                y={50 - barHeight}
-                                width={barW}
-                                height={barHeight * 2}
-                                rx="0.5"
-                                fill={track.color}
-                              />
-                            );
-                          }}
-                        </For>
-                      </svg>
+                      <Waveform
+                        samples={getClipSamples(clip)}
+                        color={track.color}
+                        barCount={getBarCount(durationMs)}
+                      />
                     </div>
                   );
-                }}
-              </For>
-            </Show>
+                })()}
+              </Show>
 
-            {/* Stacked mode - tracks vertically stacked */}
-            <Show when={viewMode() === "stacked"}>
-              <div class="absolute inset-0 flex flex-col">
+              {/* Overlay mode - all tracks overlaid, selected dominant */}
+              <Show when={viewMode() === "overlay"}>
                 <For each={store.currentMix()?.tracks}>
                   {(track, i) => {
-                    const isSelected = i() === store.selectedTrack();
-                    const isSelectedAndRecording = () => isSelected && isRecording();
+                    if (!track.clip) return null;
                     const clip = track.clip;
+                    const isSelected = () => i() === store.selectedTrack();
+                    const isSelectedAndRecording = () => isSelected() && isRecording();
+                    const durationMs = clip.original_duration_ms;
+                    const positionPx = msToPixels(clip.position_ms || 0);
+                    // Dim existing clip when recording over it
+                    const opacity = () => {
+                      if (isSelectedAndRecording()) return 0.3;
+                      if (track.muted) return 0.15;
+                      return isSelected() ? 0.9 : 0.4;
+                    };
                     return (
                       <div
-                        class="flex-1 relative border-b border-neutral-800 last:border-b-0"
+                        class="absolute top-0 bottom-0 flex items-center"
                         style={{
-                          "background-color": isSelected ? "rgba(255,255,255,0.03)" : "transparent",
+                          left: `${positionPx}px`,
+                          opacity: opacity(),
+                          "z-index": isSelected() ? 5 : 1,
                         }}
                       >
-                        {clip &&
-                          !isSelectedAndRecording() &&
-                          (() => {
-                            const durationSec = clip.original_duration_ms / 1000;
-                            const barCount = Math.max(
-                              20,
-                              Math.min(200, Math.floor(durationSec * 10)),
-                            );
-                            const bars = generateWaveform(clip.id, barCount);
-                            const clipWidth =
-                              (clip.original_duration_ms / getTimelineScale()) * 100;
-                            return (
-                              <div
-                                class="absolute top-0 bottom-0 left-0"
-                                style={{
-                                  width: `${Math.max(clipWidth, 5)}%`,
-                                  opacity: track.muted ? 0.2 : 0.8,
-                                }}
-                              >
-                                <svg
-                                  class="w-full h-full"
-                                  viewBox="0 0 100 100"
-                                  preserveAspectRatio="none"
-                                >
-                                  <For each={bars}>
-                                    {(height, idx) => {
-                                      const barHeight = Math.max(height * 40, 3);
-                                      const x = (idx() / bars.length) * 100;
-                                      const barW = (100 / bars.length) * 0.6;
-                                      return (
-                                        <rect
-                                          x={x}
-                                          y={50 - barHeight}
-                                          width={barW}
-                                          height={barHeight * 2}
-                                          rx="0.5"
-                                          fill={track.color}
-                                        />
-                                      );
-                                    }}
-                                  </For>
-                                </svg>
-                              </div>
-                            );
-                          })()}
-                        {/* Track label */}
-                        <div
-                          class="absolute top-1 left-1 text-[9px] px-1 rounded text-white"
-                          style={{ "background-color": track.color, opacity: 0.8 }}
-                        >
-                          {track.name}
-                        </div>
+                        <Waveform
+                          samples={getClipSamples(clip)}
+                          color={track.color}
+                          barCount={getBarCount(durationMs)}
+                        />
                       </div>
                     );
                   }}
                 </For>
-              </div>
-            </Show>
-          </Show>
-        </Show>
+              </Show>
 
-        {/* Live recording waveform - matches saved waveform style exactly */}
-        <Show when={!trimMode() && isRecording()}>
-          {(() => {
-            const track = store.currentMix()?.tracks[store.selectedTrack()];
-            const waveform = recordingWaveform();
-            const startPct = (recordingStartMs() / getTimelineScale()) * 100;
-            const currentPct = (playheadMs() / getTimelineScale()) * 100;
-            const recWidth = Math.max(currentPct - startPct, 1);
-            const color = track?.color || "#ff453a"; // Use track color for recording waveform
-
-            // Calculate bar count same way as saved waveform: 10 bars per second
-            const recordingDurationSec = (playheadMs() - recordingStartMs()) / 1000;
-            const targetBarCount = Math.max(
-              20,
-              Math.min(200, Math.floor(recordingDurationSec * 10)),
-            );
-
-            // Resample waveform to match target bar count
-            const rawBars = waveform;
-            const displayBars: number[] = [];
-            if (rawBars.length > 0) {
-              const step = Math.max(1, rawBars.length / targetBarCount);
-              for (let i = 0; i < targetBarCount && i * step < rawBars.length; i++) {
-                const idx = Math.floor(i * step);
-                displayBars.push(rawBars[idx]);
-              }
-            }
-
-            const barCount = displayBars.length || 1;
-            return (
-              <div
-                class="absolute top-0 bottom-0 pointer-events-none"
-                style={{
-                  left: `${startPct}%`,
-                  width: `${recWidth}%`,
-                  opacity: 0.9,
-                  "z-index": 5,
-                }}
-              >
-                <svg class="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-                  <For each={displayBars}>
-                    {(level, idx) => {
-                      // Amplify input level to match saved waveform visual scale
-                      const amplified = Math.min(1, level * 4);
-                      const barHeight = Math.max(amplified * 40, 2);
-                      const x = (idx() / barCount) * 100;
-                      const barW = (100 / barCount) * 0.6;
+              {/* Stacked mode - tracks vertically stacked */}
+              <Show when={viewMode() === "stacked"}>
+                <div class="absolute inset-0 flex flex-col">
+                  <For each={store.currentMix()?.tracks}>
+                    {(track, i) => {
+                      // Must be a function for reactivity in SolidJS
+                      const isSelected = () => i() === store.selectedTrack();
+                      const isSelectedAndRecording = () => isSelected() && isRecording();
+                      const clip = track.clip;
                       return (
-                        <rect
-                          x={x}
-                          y={50 - barHeight}
-                          width={barW}
-                          height={barHeight * 2}
-                          rx="0.5"
-                          fill={color}
-                        />
+                        <div
+                          class="flex-1 relative border-b border-neutral-800 last:border-b-0 overflow-hidden"
+                          style={{
+                            "background-color": isSelected()
+                              ? "rgba(255,255,255,0.03)"
+                              : "transparent",
+                          }}
+                        >
+                          {clip &&
+                            (() => {
+                              const durationMs = clip.original_duration_ms;
+                              const positionPx = msToPixels(clip.position_ms || 0);
+                              // Dim existing clip when recording over it
+                              const opacity = isSelectedAndRecording()
+                                ? 0.3
+                                : track.muted
+                                  ? 0.2
+                                  : 0.8;
+                              return (
+                                <div
+                                  class="absolute top-0 bottom-0 flex items-center"
+                                  style={{ left: `${positionPx}px`, opacity }}
+                                >
+                                  <Waveform
+                                    samples={getClipSamples(clip)}
+                                    color={track.color}
+                                    barCount={getBarCount(durationMs)}
+                                  />
+                                </div>
+                              );
+                            })()}
+                          {/* Live recording waveform for this track */}
+                          <Show when={isSelectedAndRecording()}>
+                            {(() => {
+                              const startPx = msToPixels(recordingStartMs());
+                              const color = track.color || "#ff453a";
+                              const samples = recordingWaveform();
+                              const elapsedMs = playheadMs() - recordingStartMs();
+                              const maxBars = Math.max(0, Math.floor(elapsedMs / 50));
+                              const clippedSamples = samples.slice(0, maxBars);
+                              return (
+                                <div
+                                  class="absolute top-0 bottom-0 pointer-events-none flex items-center"
+                                  style={{ left: `${startPx}px`, opacity: 0.9, "z-index": 5 }}
+                                >
+                                  <Waveform samples={clippedSamples} color={color} live />
+                                </div>
+                              );
+                            })()}
+                          </Show>
+                          {/* Track label */}
+                          <div
+                            class="absolute top-1 left-1 text-[9px] px-1 rounded text-white z-10"
+                            style={{ "background-color": track.color, opacity: 0.8 }}
+                          >
+                            {track.name}
+                          </div>
+                        </div>
                       );
                     }}
                   </For>
-                </svg>
-              </div>
-            );
-          })()}
-        </Show>
+                </div>
+              </Show>
 
-        {/* Playhead - hide in trim mode */}
-        <Show when={!trimMode()}>
-          <div
-            class="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none z-10"
-            style={{ left: `${playheadPercent()}%` }}
-          >
-            <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white" />
+              {/* Live recording waveform (for single and overlay modes) */}
+              <Show when={isRecording() && viewMode() !== "stacked"}>
+                {(() => {
+                  const track = store.currentMix()?.tracks[store.selectedTrack()];
+                  const startPx = msToPixels(recordingStartMs());
+                  const color = track?.color || "#ff453a";
+                  const samples = recordingWaveform();
+                  // Clip samples to match playhead position (avoid running ahead due to timing)
+                  const elapsedMs = playheadMs() - recordingStartMs();
+                  const maxBars = Math.max(0, Math.floor(elapsedMs / 50));
+                  const clippedSamples = samples.slice(0, maxBars);
+
+                  return (
+                    <div
+                      class="absolute top-0 bottom-0 pointer-events-none flex items-center"
+                      style={{
+                        left: `${startPx}px`,
+                        opacity: 0.9,
+                        "z-index": 5,
+                      }}
+                    >
+                      <Waveform samples={clippedSamples} color={color} live />
+                    </div>
+                  );
+                })()}
+              </Show>
+            </Show>
+
+            {/* Playhead */}
+            <div
+              class="absolute top-0 bottom-0 w-0.5 bg-white pointer-events-none z-10"
+              style={{ left: `${msToPixels(playheadMs())}px` }}
+            >
+              <div class="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white" />
+            </div>
           </div>
         </Show>
       </div>
 
-      {/* Timeline */}
+      {/* Timeline - shows visible time range based on scroll */}
       <div class="h-6 flex items-center justify-between px-4 text-xs text-neutral-500 bg-neutral-900 border-t border-neutral-800">
-        <For each={[0, 0.25, 0.5, 0.75, 1]}>
-          {(pct) => <span>{formatTimeShort(pct * getTimelineScale())}</span>}
-        </For>
+        {(() => {
+          const markers = getVisibleTimeMarkers();
+          return (
+            <>
+              <span>{formatTimeShort(markers[0])}</span>
+              <span>{formatTimeShort(markers[1])}</span>
+              <span>{formatTimeShort(markers[2])}</span>
+              <span>{formatTimeShort(markers[3])}</span>
+              <span>{formatTimeShort(markers[4])}</span>
+            </>
+          );
+        })()}
       </div>
 
       {/* Time Display */}

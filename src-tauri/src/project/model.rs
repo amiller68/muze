@@ -111,11 +111,15 @@ impl Track {
 pub struct Clip {
     pub id: Uuid,
     pub audio_file: String,
+    #[serde(default)]
+    pub position_ms: u64, // Start position in timeline (default 0 for backwards compatibility)
     pub original_duration_ms: u64,
     pub trim_start_ms: u64,
     pub trim_end_ms: u64,
     pub loop_enabled: bool,
     pub cuts: Vec<CutRegion>,
+    #[serde(default)]
+    pub waveform: Option<Vec<f32>>,
 }
 
 impl Clip {
@@ -124,11 +128,13 @@ impl Clip {
         Self {
             id: Uuid::new_v4(),
             audio_file: audio_file.to_string(),
+            position_ms: 0,
             original_duration_ms: duration_ms,
             trim_start_ms: 0,
             trim_end_ms: duration_ms,
             loop_enabled: false,
             cuts: Vec::new(),
+            waveform: None,
         }
     }
 
