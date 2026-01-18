@@ -104,7 +104,9 @@ make build    # Production build
 
 ---
 
-## See Also
+## Slash Commands
 
-- [README.md](./README.md) - Quick start overview
-- `.claude/commands/` - Claude Code slash commands
+Use these Claude Code commands for common workflows:
+- `/check` - Run all success criteria checks
+- `/draft` - Create a draft PR
+- `/review` - Review branch against conventions
