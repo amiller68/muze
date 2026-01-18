@@ -370,7 +370,7 @@ pub fn get_waveform(audio_path: String) -> Result<Vec<f32>, String> {
     let mono: Vec<f32> = if channels == 2 {
         samples
             .chunks(2)
-            .map(|chunk| ((chunk[0].abs() + chunk.get(1).map(|s| s.abs()).unwrap_or(0.0)) * 0.5))
+            .map(|chunk| (chunk[0].abs() + chunk.get(1).map(|s| s.abs()).unwrap_or(0.0)) * 0.5)
             .collect()
     } else {
         samples.iter().map(|s| s.abs()).collect()
