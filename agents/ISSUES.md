@@ -1,5 +1,7 @@
 # Issues and Tickets
 
+> **See also:** [INDEX.md](./INDEX.md) for documentation navigation, [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) for the definition of "done"
+
 Guide for AI agents and contributors on how issues are organized in this repository.
 
 ---
@@ -131,3 +133,11 @@ Example:
 - Include code snippets for complex changes
 - Always link back to the parent epic
 - Update status immediately when starting/finishing work
+
+---
+
+## See Also
+
+- [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) - Definition of "done"
+- [CONTRIBUTING.md](./CONTRIBUTING.md) - Code standards and PR process
+- [INDEX.md](./INDEX.md) - Documentation navigation

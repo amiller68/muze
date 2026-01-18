@@ -1,5 +1,7 @@
 # Contributing to Muse
 
+> **See also:** [INDEX.md](./INDEX.md) for documentation navigation, [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) for the definition of "done"
+
 ## Before You Start
 
 ```bash
@@ -172,6 +174,34 @@ Run: `cargo test` or `make test-be`
 
 ---
 
+## Commit Conventions
+
+We use [conventional commits](https://www.conventionalcommits.org/) for clear history and changelog generation.
+
+| Prefix | Use For | Example |
+|--------|---------|---------|
+| `feat:` | New features | `feat: add track volume slider` |
+| `fix:` | Bug fixes | `fix: correct playhead position on seek` |
+| `docs:` | Documentation | `docs: update architecture diagram` |
+| `refactor:` | Code refactoring | `refactor: extract audio utils` |
+| `test:` | Tests | `test: add mixStore unit tests` |
+| `chore:` | Maintenance | `chore: update dependencies` |
+| `perf:` | Performance | `perf: optimize waveform rendering` |
+
+### Example
+
+```
+feat: add export to MP3 format
+
+- Implement MP3 encoding in Rust backend
+- Add export format selector to UI
+- Update export command to support format parameter
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+```
+
+---
+
 ## PR Checklist
 
 - [ ] `make check` passes
@@ -180,3 +210,11 @@ Run: `cargo test` or `make test-be`
 - [ ] New functionality has tests
 - [ ] No console.log in production code
 - [ ] Auto-save pattern preserved if touching save logic
+
+---
+
+## See Also
+
+- [SUCCESS_CRITERIA.md](./SUCCESS_CRITERIA.md) - What "done" means
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - Technical patterns
+- [INDEX.md](./INDEX.md) - Documentation navigation

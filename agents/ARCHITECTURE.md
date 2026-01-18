@@ -1,5 +1,7 @@
 # Muse Architecture
 
+> **See also:** [CONCEPTS.md](./CONCEPTS.md) for high-level domain concepts and the data model
+
 ## Overview
 
 Muse is a multi-track audio recorder with a SolidJS frontend and Rust/Tauri backend. It supports iOS (via AltStore) and desktop (macOS/Linux).
@@ -207,3 +209,12 @@ AUTO_SAVE_DEBOUNCE_MS = 300  // Save debounce
 MIN_TIMELINE_MS = 15000      // Default timeline view
 ZOOM_MIN = 0.25, ZOOM_MAX = 8
 ```
+
+---
+
+## See Also
+
+- [CONCEPTS.md](./CONCEPTS.md) - High-level domain concepts
+- [PROJECT_LAYOUT.md](./PROJECT_LAYOUT.md) - Directory structure
+- [CONTRIBUTING.md](./CONTRIBUTING.md) - Code standards and patterns
+- [INDEX.md](./INDEX.md) - Documentation navigation
