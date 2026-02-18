@@ -486,7 +486,8 @@ fn run_audio_thread(
                                 sample_rate,
                                 volume: info.volume,
                                 muted: info.muted,
-                                position_samples: ((info.position_ms / 1000.0) * sample_rate as f64) as usize,
+                                position_samples: ((info.position_ms / 1000.0) * sample_rate as f64)
+                                    as usize,
                             });
                         }
                         Err(e) => {
