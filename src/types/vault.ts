@@ -16,3 +16,13 @@ export interface VaultRegistry {
   active_vault_id: string;
   vaults: Vault[];
 }
+
+// Dropbox-specific types
+export interface DropboxAuthState {
+  isConnected: boolean;
+  authUrl?: string;
+}
+
+export interface DropboxConfig {
+  folder_path: string;
+}
